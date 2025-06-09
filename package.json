@@ -9,13 +9,30 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-navigation/bottom-tabs": "^7.3.14",
+    "@react-navigation/native": "^7.1.10",
+    "@react-navigation/stack": "^7.3.3",
+    "buffer": "^6.0.3",
+    "crypto-js": "^4.2.0",
     "expo": "~53.0.10",
+    "expo-crypto": "^14.1.5",
+    "expo-device": "^7.1.4",
+    "expo-notifications": "^0.31.3",
+    "expo-secure-store": "^14.2.3",
+    "expo-sqlite": "^15.2.12",
     "expo-status-bar": "~2.2.3",
     "react": "19.0.0",
-    "react-native": "0.79.3"
+    "react-native": "0.79.3",
+    "react-native-get-random-values": "^1.11.0",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1",
+    "react-native-vector-icons": "^10.2.0",
+    "socket.io-client": "^4.8.1",
+    "expo-local-authentication": "~16.0.4"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0"
+    "@babel/core": "^7.27.4"
   },
   "private": true
 }
