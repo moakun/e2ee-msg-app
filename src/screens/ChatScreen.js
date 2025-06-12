@@ -450,6 +450,8 @@ const sendMessage = async (messageText) => {
           onSendMessage={sendMessage}
           onTyping={handleTyping}
           disabled={sendingMessage}
+          lastMessage={messages[messages.length - 1]} // Pass last message
+          conversationContext={messages.slice(-5)} // Last 5 messages for context
         />
       </KeyboardAvoidingView>
     </SafeAreaView>

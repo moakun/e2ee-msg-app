@@ -1,5 +1,5 @@
 // src/screens/ProfileScreen.js - Complete with Biometric Debug
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { DatabaseService } from '../services/database/DatabaseService';
 import { Storage } from '../utils/storage';
 import { UI_CONFIG } from '../utils/constants';
+import { WebSocketService } from '../services/network/WebSocketService';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -76,6 +77,44 @@ export default function ProfileScreen() {
       ]
     );
   };
+
+  const WebSocketDebug = () => {
+  const [wsStatus, setWsStatus] = useState(null);
+
+  const checkWebSocketStatus = () => {
+    const status = WebSocketService.getDebugInfo();
+    setWsStatus(status);
+  };
+
+  const forceRejoin = async () => {
+    await WebSocketService.forceRejoinChats();
+    checkWebSocketStatus();
+    Alert.alert('Success', 'Forced rejoin of all chats');
+  };
+
+  return (
+    <View style={styles.debugContainer}>
+      <Text style={styles.debugTitle}>🌐 WebSocket Debug</Text>
+      
+      <TouchableOpacity style={styles.button} onPress={checkWebSocketStatus}>
+        <Text style={styles.buttonText}>Check Status</Text>
+      </TouchableOpacity>
+      
+      {wsStatus && (
+        <View style={styles.statusContainer}>
+          <Text>Connected: {wsStatus.isConnected ? '✅' : '❌'}</Text>
+          <Text>Auto-join Done: {wsStatus.autoJoinCompleted ? '✅' : '❌'}</Text>
+          <Text>Joined Chats: {wsStatus.joinedChats.length}</Text>
+          <Text>User ID: {wsStatus.userId}</Text>
+        </View>
+      )}
+      
+      <TouchableOpacity style={styles.button} onPress={forceRejoin}>
+        <Text style={styles.buttonText}>Force Rejoin Chats</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
   const SettingItem = ({ title, subtitle, icon, onPress, rightComponent }) => (
     <TouchableOpacity style={styles.settingItem} onPress={onPress}>

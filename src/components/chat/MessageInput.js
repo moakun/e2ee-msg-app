@@ -1,26 +1,64 @@
-// src/components/chat/MessageInput.js - Fixed Layout
-import React, { useState, useRef } from 'react';
+// src/components/chat/MessageInput.js - Enhanced with Smart Replies
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Platform
+  Platform,
+  ScrollView,
+  Text
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SmartReplyService } from '../../services/ai/SmartReplyService';
 import { UI_CONFIG } from '../../utils/constants';
 
-export function MessageInput({ onSendMessage, onTyping, disabled = false }) {
+export function MessageInput({ 
+  onSendMessage, 
+  onTyping, 
+  disabled = false, 
+  lastMessage = null,
+  conversationContext = [] 
+}) {
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [smartReplies, setSmartReplies] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const typingTimeoutRef = useRef();
+
+  useEffect(() => {
+    // Generate smart replies when a new message is received
+    if (lastMessage && lastMessage.content && !lastMessage.isMine) {
+      generateSmartReplies(lastMessage.content);
+    }
+  }, [lastMessage]);
+
+  const generateSmartReplies = async (lastMessageText) => {
+    try {
+      const suggestions = await SmartReplyService.suggestReplies(
+        lastMessageText, 
+        conversationContext
+      );
+      setSmartReplies(suggestions);
+      setShowSuggestions(suggestions.length > 0);
+    } catch (error) {
+      console.error('Failed to generate smart replies:', error);
+    }
+  };
 
   const handleSend = () => {
     if (message.trim() && !disabled) {
       onSendMessage(message.trim());
       setMessage('');
+      setShowSuggestions(false);
       handleTypingEnd();
     }
+  };
+
+  const handleSmartReply = (reply) => {
+    onSendMessage(reply);
+    setShowSuggestions(false);
+    setMessage('');
   };
 
   const handleTextChange = (text) => {
@@ -40,6 +78,13 @@ export function MessageInput({ onSendMessage, onTyping, disabled = false }) {
     typingTimeoutRef.current = setTimeout(() => {
       handleTypingEnd();
     }, 2000);
+
+    // Hide smart replies when user starts typing
+    if (text.length > 0) {
+      setShowSuggestions(false);
+    } else if (smartReplies.length > 0) {
+      setShowSuggestions(true);
+    }
   };
 
   const handleTypingEnd = () => {
@@ -57,6 +102,28 @@ export function MessageInput({ onSendMessage, onTyping, disabled = false }) {
 
   return (
     <View style={styles.container}>
+      {/* Smart Reply Suggestions */}
+      {showSuggestions && smartReplies.length > 0 && (
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.suggestionsContainer}
+          contentContainerStyle={styles.suggestionsContent}
+        >
+          {smartReplies.map((reply, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.suggestionButton}
+              onPress={() => handleSmartReply(reply)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.suggestionText}>{reply}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Message Input */}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.textInput}
@@ -102,6 +169,30 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E5E5EA',
     minHeight: 60
+  },
+  suggestionsContainer: {
+    marginBottom: UI_CONFIG.SPACING.SM,
+    maxHeight: 40
+  },
+  suggestionsContent: {
+    paddingHorizontal: UI_CONFIG.SPACING.SM,
+    alignItems: 'center'
+  },
+  suggestionButton: {
+    backgroundColor: '#F0F8FF',
+    borderRadius: 20,
+    paddingHorizontal: UI_CONFIG.SPACING.MD,
+    paddingVertical: UI_CONFIG.SPACING.SM,
+    marginRight: UI_CONFIG.SPACING.SM,
+    borderWidth: 1,
+    borderColor: UI_CONFIG.COLORS.PRIMARY,
+    minHeight: 36,
+    justifyContent: 'center'
+  },
+  suggestionText: {
+    color: UI_CONFIG.COLORS.PRIMARY,
+    fontSize: 14,
+    fontWeight: '500'
   },
   inputContainer: {
     flexDirection: 'row',

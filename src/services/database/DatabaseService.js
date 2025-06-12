@@ -1,4 +1,4 @@
-// src/services/database/DatabaseService.js - Fixed Version
+// src/services/database/DatabaseService.js - Optimized Version
 import * as SQLite from 'expo-sqlite';
 
 class DatabaseServiceClass {
@@ -28,19 +28,24 @@ class DatabaseServiceClass {
     const startTime = Date.now();
     
     try {
-      console.log('🔄 Initializing database...');
+      console.log('🔄 Starting database initialization...');
       
-      // Open database connection
+      // Step 1: Open database connection (usually quick)
+      console.log('📡 Opening database connection...');
       this.db = await SQLite.openDatabaseAsync('SecureChat.db');
       console.log('✅ Database connection opened');
 
-      // Enable foreign keys
-      await this.db.execAsync('PRAGMA foreign_keys = ON;');
+      // Step 2: Set basic pragmas (quick)
+      console.log('⚙️ Setting database pragmas...');
+      await this.db.execAsync('PRAGMA foreign_keys = ON');
+      console.log('✅ Pragmas set');
 
-      // Create all tables
-      await this.createAllTablesOptimized();
+      // Step 3: Create tables efficiently
+      console.log('🔧 Creating database tables...');
+      await this.createTablesEfficiently();
+      console.log('✅ Tables created');
       
-      // Set version
+      // Step 4: Set version (quick)
       await this.setDatabaseVersion(this.currentVersion);
       
       this.isInitialized = true;
@@ -60,44 +65,40 @@ class DatabaseServiceClass {
     }
   }
 
-  async createAllTablesOptimized() {
+  async createTablesEfficiently() {
     try {
-      // Temporarily disable foreign keys during table creation
-      await this.db.execAsync('PRAGMA foreign_keys = OFF;');
-      
-      // Create tables one by one to avoid issues
-      const tables = [
-        // Version table
-        `CREATE TABLE IF NOT EXISTS database_version (
+      // Create all tables in a single batch operation for speed
+      const createTableSQL = `
+        -- Version table
+        CREATE TABLE IF NOT EXISTS database_version (
           version INTEGER PRIMARY KEY
-        )`,
+        );
 
-        // Users table - ID can be provided or auto-generated
-        `CREATE TABLE IF NOT EXISTS users (
+        -- Users table
+        CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY,
           username TEXT UNIQUE NOT NULL,
           public_key TEXT NOT NULL,
-          encrypted_private_key TEXT NOT NULL,
-          salt TEXT NOT NULL,
+          encrypted_private_key TEXT DEFAULT '',
+          salt TEXT DEFAULT '',
           is_online INTEGER DEFAULT 0,
           last_seen INTEGER DEFAULT 0,
           created_at INTEGER NOT NULL
-        )`,
+        );
 
-        // Chats table
-        `CREATE TABLE IF NOT EXISTS chats (
+        -- Chats table
+        CREATE TABLE IF NOT EXISTS chats (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
           type TEXT DEFAULT 'direct',
           description TEXT DEFAULT '',
           created_by INTEGER NOT NULL,
           created_at INTEGER NOT NULL,
-          updated_at INTEGER DEFAULT 0,
-          FOREIGN KEY (created_by) REFERENCES users (id)
-        )`,
+          updated_at INTEGER DEFAULT 0
+        );
 
-        // Messages table - without foreign key constraints
-        `CREATE TABLE IF NOT EXISTS messages (
+        -- Messages table
+        CREATE TABLE IF NOT EXISTS messages (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           chat_id INTEGER NOT NULL,
           sender_id INTEGER NOT NULL,
@@ -105,29 +106,29 @@ class DatabaseServiceClass {
           message_type TEXT DEFAULT 'text',
           timestamp INTEGER NOT NULL,
           created_at INTEGER NOT NULL
-        )`,
+        );
 
-        // Key pairs table
-        `CREATE TABLE IF NOT EXISTS key_pairs (
+        -- Key pairs table
+        CREATE TABLE IF NOT EXISTS key_pairs (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER UNIQUE NOT NULL,
           public_key TEXT NOT NULL,
           encrypted_private_key TEXT NOT NULL,
           created_at INTEGER NOT NULL
-        )`,
+        );
 
-        // Chat participants table
-        `CREATE TABLE IF NOT EXISTS chat_participants (
+        -- Chat participants table
+        CREATE TABLE IF NOT EXISTS chat_participants (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           chat_id INTEGER NOT NULL,
           user_id INTEGER NOT NULL,
           joined_at INTEGER NOT NULL,
           role TEXT DEFAULT 'member',
           UNIQUE(chat_id, user_id)
-        )`,
+        );
 
-        // Contacts table
-        `CREATE TABLE IF NOT EXISTS contacts (
+        -- Contacts table
+        CREATE TABLE IF NOT EXISTS contacts (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
           contact_user_id INTEGER NOT NULL,
@@ -135,10 +136,10 @@ class DatabaseServiceClass {
           contact_public_key TEXT NOT NULL,
           added_at INTEGER NOT NULL,
           UNIQUE(user_id, contact_user_id)
-        )`,
+        );
 
-        // Chat invitations table
-        `CREATE TABLE IF NOT EXISTS chat_invitations (
+        -- Chat invitations table
+        CREATE TABLE IF NOT EXISTS chat_invitations (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           from_user_id INTEGER NOT NULL,
           to_user_id INTEGER NOT NULL,
@@ -146,18 +147,15 @@ class DatabaseServiceClass {
           status TEXT DEFAULT 'pending',
           created_at INTEGER NOT NULL,
           responded_at INTEGER DEFAULT 0
-        )`
-      ];
+        );
 
-      // Create each table separately
-      for (const tableQuery of tables) {
-        await this.db.execAsync(tableQuery);
-      }
-      
-      // Re-enable foreign keys
-      await this.db.execAsync('PRAGMA foreign_keys = ON;');
-      
-      console.log('✅ All tables created successfully');
+        -- Create essential indexes
+        CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_participants_user ON chat_participants(user_id);
+      `;
+
+      // Execute all at once for maximum speed
+      await this.db.execAsync(createTableSQL);
       
     } catch (error) {
       console.error('❌ Failed to create tables:', error);
@@ -183,7 +181,7 @@ class DatabaseServiceClass {
     }
   }
 
-  // USER OPERATIONS - Fixed to handle backend user IDs
+  // USER OPERATIONS
 
   async createUser(userData) {
     const { id, username, publicKey, encryptedPrivateKey, salt } = userData;
@@ -191,7 +189,6 @@ class DatabaseServiceClass {
     try {
       await this.ensureInitialized();
       
-      // If ID is provided (from backend), use it. Otherwise let SQLite auto-generate
       if (id) {
         // User from backend with specific ID
         await this.db.runAsync(

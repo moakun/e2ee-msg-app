@@ -1,3 +1,4 @@
+// src/services/network/WebSocketService.js - FIXED Auto-Join
 import io from 'socket.io-client';
 import { NetworkOptimizer } from './NetworkOptimizer';
 import { Storage } from '../../utils/storage';
@@ -12,23 +13,26 @@ class WebSocketServiceClass {
     this.networkOptimizer = new NetworkOptimizer();
     this.isEnabled = false;
     this.authToken = null;
-    this.processedMessages = new Set(); // Track processed message IDs
-    this.messageBuffer = []; // Buffer for batch processing
-    this.bufferTimer = null;
+    this.processedMessages = new Set();
+    this.joinedChats = new Set();
+    this.userId = null;
+    this.username = null;
+    this.autoJoinCompleted = false;
   }
 
-
   async connect(serverUrl, userId, username) {
-    // Skip connection if no server URL or disabled
-    if (!serverUrl || serverUrl.includes('your-server.com') || serverUrl.includes('your-websocket-server.com')) {
+    this.userId = userId;
+    this.username = username;
+    this.autoJoinCompleted = false;
+
+    if (!serverUrl || serverUrl.includes('your-server.com')) {
       console.log('WebSocket disabled: No server configured');
       this.isEnabled = false;
       return;
     }
 
     try {
-      // Get auth token
-      this.authToken = await Storage.getSecure('authToken');
+      this.authToken = await Storage.getSecureString('authToken');
       if (!this.authToken) {
         console.log('WebSocket disabled: No auth token');
         this.isEnabled = false;
@@ -36,8 +40,7 @@ class WebSocketServiceClass {
       }
 
       this.isEnabled = true;
-      
-      console.log('Connecting to WebSocket server:', serverUrl);
+      console.log('🔌 Connecting to WebSocket server:', serverUrl);
       
       this.socket = io(serverUrl, {
         auth: {
@@ -46,16 +49,11 @@ class WebSocketServiceClass {
           token: this.authToken
         },
         transports: ['websocket'],
-        upgrade: true,
-        rememberUpgrade: true,
         timeout: 20000,
         autoConnect: false
       });
 
       this.setupEventListeners();
-      this.networkOptimizer.startOptimization(this.socket);
-      
-      // Connect manually
       this.socket.connect();
       
     } catch (error) {
@@ -73,15 +71,23 @@ class WebSocketServiceClass {
       this.reconnectAttempts = 0;
       this.processMessageQueue();
       
-      // Authenticate after connection
+      // Authenticate immediately
       this.socket.emit('authenticate', {
+        userId: this.userId,
+        username: this.username,
         token: this.authToken
       });
     });
 
-    this.socket.on('authenticated', (data) => {
+    this.socket.on('authenticated', async (data) => {
       if (data.success) {
         console.log('✅ WebSocket authentication successful');
+        
+        // IMPORTANT: Auto-join ALL user chats immediately after authentication
+        if (!this.autoJoinCompleted) {
+          await this.autoJoinUserChats();
+          this.autoJoinCompleted = true;
+        }
       } else {
         console.error('❌ WebSocket authentication failed');
         this.disconnect();
@@ -91,27 +97,26 @@ class WebSocketServiceClass {
     this.socket.on('disconnect', (reason) => {
       console.log('❌ Disconnected from WebSocket server:', reason);
       this.isConnected = false;
+      this.joinedChats.clear();
+      this.autoJoinCompleted = false;
       
-      // Only attempt reconnection if not manually disconnected
       if (reason !== 'io client disconnect') {
         this.handleReconnection();
       }
     });
 
-    this.socket.on('connect_error', (error) => {
-      console.error('❌ WebSocket connection error:', error.message);
-      this.isConnected = false;
-      this.handleReconnection();
-    });
-
-    // Message events
+    // CRITICAL: Listen for new messages on ALL joined chats
     this.socket.on('new_message', (data) => {
-      console.log('📨 Received new message for chat:', data.chatId);
+      console.log(`📨 Received message for chat ${data.chatId} from ${data.senderUsername}`);
       this.handleIncomingMessage(data);
     });
 
+    this.socket.on('joined_chat', (data) => {
+      console.log(`✅ Successfully joined chat: ${data.chatId}`);
+      this.joinedChats.add(data.chatId.toString());
+    });
+
     this.socket.on('message_delivered', (data) => {
-      console.log('✅ Message delivered:', data.messageId);
       this.handleMessageDelivery(data);
     });
 
@@ -119,22 +124,67 @@ class WebSocketServiceClass {
       this.handleTypingIndicator(data);
     });
 
-    this.socket.on('user_joined', (data) => {
-      console.log('👋 User joined chat:', data.username);
-    });
-
-    this.socket.on('user_left', (data) => {
-      console.log('👋 User left chat:', data.username);
-    });
-
     this.socket.on('error', (error) => {
       console.error('❌ WebSocket error:', error);
     });
   }
 
+  // FIXED: Auto-join all user chats with proper error handling
+  async autoJoinUserChats() {
+    if (!this.isConnected || !this.userId) {
+      console.log('❌ Cannot auto-join: not connected or no user ID');
+      return;
+    }
+
+    try {
+      console.log('🔄 Starting auto-join process...');
+      
+      // Dynamic import to avoid circular dependency
+      const { DatabaseService } = await import('../database/DatabaseService');
+      
+      // Get user's chats
+      const userChats = await DatabaseService.getUserChats(this.userId);
+      console.log(`📋 Found ${userChats.length} chats to join`);
+      
+      if (userChats.length === 0) {
+        console.log('📭 No chats found for auto-join');
+        this.autoJoinCompleted = true;
+        return;
+      }
+
+      // Join each chat with delay to avoid overwhelming server
+      for (const chat of userChats) {
+        const chatIdStr = chat.id.toString();
+        
+        if (!this.joinedChats.has(chatIdStr)) {
+          console.log(`🚪 Auto-joining chat: "${chat.name}" (ID: ${chat.id})`);
+          
+          // Emit join_chat event
+          this.socket.emit('join_chat', { chatId: chat.id });
+          
+          // Optimistically add to joined set
+          this.joinedChats.add(chatIdStr);
+          
+          // Small delay between joins
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } else {
+          console.log(`⏭️ Already in chat: ${chat.id}`);
+        }
+      }
+      
+      console.log(`✅ Auto-join completed! Joined ${userChats.length} chats`);
+      console.log(`📊 Total joined chats: ${this.joinedChats.size}`);
+      this.autoJoinCompleted = true;
+      
+    } catch (error) {
+      console.error('❌ Auto-join failed:', error);
+      this.autoJoinCompleted = true; // Prevent infinite retries
+    }
+  }
+
   sendMessage(messageData) {
     if (!this.isEnabled) {
-      console.log('WebSocket disabled - message not sent via WebSocket');
+      console.log('WebSocket disabled - message not sent');
       return;
     }
 
@@ -142,10 +192,9 @@ class WebSocketServiceClass {
     messageData.messageId = messageId;
 
     if (this.isConnected && this.socket) {
-      console.log('📤 Sending message via WebSocket to chat:', messageData.chatId);
+      console.log(`📤 Sending message to chat ${messageData.chatId}`);
       this.socket.emit('send_message', messageData);
     } else {
-      // Queue message for when connection is restored
       this.messageQueue.push({
         type: 'send_message',
         data: messageData,
@@ -158,11 +207,18 @@ class WebSocketServiceClass {
   joinChat(chatId) {
     if (!this.isEnabled) return;
     
+    const chatIdStr = chatId.toString();
+    
+    if (this.joinedChats.has(chatIdStr)) {
+      console.log(`⏭️ Already joined chat: ${chatId}`);
+      return;
+    }
+    
     if (this.isConnected && this.socket) {
-      console.log('🚪 Joining chat:', chatId);
+      console.log(`🚪 Manually joining chat: ${chatId}`);
       this.socket.emit('join_chat', { chatId });
+      this.joinedChats.add(chatIdStr);
     } else {
-      // Queue join request
       this.messageQueue.push({
         type: 'join_chat',
         data: { chatId },
@@ -171,78 +227,36 @@ class WebSocketServiceClass {
     }
   }
 
+  // DON'T leave chats when users navigate away - keep them joined for message delivery
   leaveChat(chatId) {
-    if (!this.isEnabled) return;
-    
-    if (this.isConnected && this.socket) {
-      console.log('🚪 Leaving chat:', chatId);
-      this.socket.emit('leave_chat', { chatId });
-    }
+    console.log(`📌 Keeping user in chat ${chatId} for message delivery`);
+    // We don't actually leave - users stay in all their chats
   }
 
   sendTypingIndicator(chatId, isTyping) {
-    if (!this.isEnabled) return;
-    
-    if (this.isConnected && this.socket) {
-      this.socket.emit('typing', { chatId, isTyping });
-    }
-  }
-
-  processMessageQueue() {
-    console.log(`📦 Processing ${this.messageQueue.length} queued messages`);
-    
-    while (this.messageQueue.length > 0) {
-      const queuedMessage = this.messageQueue.shift();
-      
-      // Check if message is not too old (5 minutes)
-      if (Date.now() - queuedMessage.timestamp < 300000) {
-        this.socket.emit(queuedMessage.type, queuedMessage.data);
-      } else {
-        console.log('⚠️ Discarded old queued message');
-      }
-    }
-  }
-
-  handleReconnection() {
-    if (!this.isEnabled) return;
-    
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000); // Cap at 10 seconds
-      
-      setTimeout(() => {
-        if (this.isEnabled && this.socket && !this.isConnected) {
-          console.log(`🔄 WebSocket reconnection attempt ${this.reconnectAttempts}`);
-          this.socket.connect();
-        }
-      }, delay);
-    } else {
-      console.log('❌ Max WebSocket reconnection attempts reached - giving up');
-      this.isEnabled = false;
-    }
+    if (!this.isEnabled || !this.isConnected || !this.socket) return;
+    this.socket.emit('typing', { chatId, isTyping });
   }
 
   handleIncomingMessage(data) {
     const messageId = data.messageId || `${data.timestamp}_${data.senderId}`;
     
-    // Skip if already processed
     if (this.processedMessages.has(messageId)) {
-      console.log('Duplicate WebSocket message ignored:', messageId);
+      console.log('⏭️ Duplicate message ignored:', messageId);
       return;
     }
     
-    // Add to processed set (keep only last 100 to prevent memory issues)
     this.processedMessages.add(messageId);
     if (this.processedMessages.size > 100) {
       const firstId = this.processedMessages.values().next().value;
       this.processedMessages.delete(firstId);
     }
     
-    // Emit event for components to listen to
+    console.log(`📨 Processing new message from ${data.senderUsername} in chat ${data.chatId}`);
+    
     if (this.onMessageReceived) {
       this.onMessageReceived(data);
     }
-    
   }
 
   handleMessageDelivery(data) {
@@ -257,24 +271,57 @@ class WebSocketServiceClass {
     }
   }
 
+  processMessageQueue() {
+    console.log(`📦 Processing ${this.messageQueue.length} queued messages`);
+    
+    while (this.messageQueue.length > 0) {
+      const queuedMessage = this.messageQueue.shift();
+      
+      if (Date.now() - queuedMessage.timestamp < 300000) {
+        this.socket.emit(queuedMessage.type, queuedMessage.data);
+        
+        if (queuedMessage.type === 'join_chat') {
+          this.joinedChats.add(queuedMessage.data.chatId.toString());
+        }
+      }
+    }
+  }
+
+  handleReconnection() {
+    if (!this.isEnabled) return;
+    
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
+      
+      setTimeout(() => {
+        if (this.isEnabled && this.socket && !this.isConnected) {
+          console.log(`🔄 Reconnection attempt ${this.reconnectAttempts}`);
+          this.autoJoinCompleted = false; // Reset auto-join on reconnect
+          this.socket.connect();
+        }
+      }, delay);
+    }
+  }
+
   disconnect() {
     console.log('🔌 Disconnecting WebSocket');
     
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
-      this.isConnected = false;
     }
     
+    this.isConnected = false;
     this.isEnabled = false;
     this.authToken = null;
     this.messageQueue = [];
     this.reconnectAttempts = 0;
-    this.processedMessages.clear(); // Clear processed messages
-    
-    if (this.networkOptimizer) {
-      this.networkOptimizer.stopOptimization();
-    }
+    this.processedMessages.clear();
+    this.joinedChats.clear();
+    this.autoJoinCompleted = false;
+    this.userId = null;
+    this.username = null;
   }
 
   // Event handler setters
@@ -290,71 +337,45 @@ class WebSocketServiceClass {
     this.onTypingIndicator = handler;
   }
 
-  // Development helper methods
-  enableWebSocket() {
-    this.isEnabled = true;
-  }
-
-  disableWebSocket() {
-    this.disconnect();
-    this.isEnabled = false;
-  }
-
+  // Debug methods
   getConnectionStatus() {
     return {
       enabled: this.isEnabled,
       connected: this.isConnected,
-      reconnectAttempts: this.reconnectAttempts,
-      queuedMessages: this.messageQueue.length,
-      hasToken: !!this.authToken,
-      processedMessages: this.processedMessages.size
+      autoJoinCompleted: this.autoJoinCompleted,
+      joinedChats: Array.from(this.joinedChats),
+      joinedChatsCount: this.joinedChats.size,
+      userId: this.userId,
+      hasToken: !!this.authToken
     };
   }
 
-  // Ping for connection testing
-  ping() {
-    if (this.isConnected && this.socket) {
-      const startTime = Date.now();
-      this.socket.emit('ping');
-      
-      this.socket.once('pong', () => {
-        const latency = Date.now() - startTime;
-        console.log(`🏓 WebSocket ping: ${latency}ms`);
-        return latency;
-      });
-    }
+  // Force rejoin all chats (for debugging)
+  async forceRejoinChats() {
+    console.log('🔄 Force rejoining all chats...');
+    this.joinedChats.clear();
+    this.autoJoinCompleted = false;
+    await this.autoJoinUserChats();
   }
 
-  // Force reconnection
-  forceReconnect() {
-    if (this.socket) {
-      this.socket.disconnect();
-      setTimeout(() => {
-        if (this.socket) {
-          this.socket.connect();
-        }
-      }, 1000);
-    }
+  // Check if in specific chat
+  isInChat(chatId) {
+    return this.joinedChats.has(chatId.toString());
   }
 
-  // Get socket info for debugging
-  getSocketInfo() {
-    if (!this.socket) return null;
-    
+  // Get debug info
+  getDebugInfo() {
     return {
-      id: this.socket.id,
-      connected: this.socket.connected,
-      transport: this.socket.io.engine?.transport?.name,
-      readyState: this.socket.io.readyState
+      isConnected: this.isConnected,
+      isEnabled: this.isEnabled,
+      autoJoinCompleted: this.autoJoinCompleted,
+      joinedChats: Array.from(this.joinedChats),
+      queuedMessages: this.messageQueue.length,
+      processedMessages: this.processedMessages.size,
+      userId: this.userId,
+      username: this.username
     };
-  }
-
-  // Clear processed messages (for debugging)
-  clearProcessedMessages() {
-    this.processedMessages.clear();
-    console.log('✅ Cleared processed messages cache');
   }
 }
 
-// Export a singleton instance
 export const WebSocketService = new WebSocketServiceClass();

@@ -1,3 +1,4 @@
+// src/screens/UserSearchScreen.js - Fixed Duplicate Keys
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -37,7 +38,6 @@ export default function UserSearchScreen({ navigation }) {
     }
   }, [searchQuery]);
 
-  // Function to remove duplicate users
   const removeDuplicateUsers = (users) => {
     const seen = new Set();
     return users.filter(user => {
@@ -47,29 +47,26 @@ export default function UserSearchScreen({ navigation }) {
     });
   };
 
-  // Sync users to local database
-const syncUsersToLocalDatabase = async (users) => {
-  for (const user of users) {
-    try {
-      // Check if user exists locally
-      const existingUser = await DatabaseService.getUserById(user.id);
-      
-      if (!existingUser) {
-        // Create user with backend ID
-        await DatabaseService.createUser({
-          id: user.id,  // Important: use backend ID
-          username: user.username,
-          publicKey: user.public_key,
-          encryptedPrivateKey: '',
-          salt: ''
-        });
-        console.log(`✅ Synced user ${user.username} to local database`);
+  const syncUsersToLocalDatabase = async (users) => {
+    for (const user of users) {
+      try {
+        const existingUser = await DatabaseService.getUserById(user.id);
+        
+        if (!existingUser) {
+          await DatabaseService.createUser({
+            id: user.id,
+            username: user.username,
+            publicKey: user.public_key,
+            encryptedPrivateKey: '',
+            salt: ''
+          });
+          console.log(`✅ Synced user ${user.username} to local database`);
+        }
+      } catch (error) {
+        console.error(`Failed to sync user ${user.username}:`, error);
       }
-    } catch (error) {
-      console.error(`Failed to sync user ${user.username}:`, error);
     }
-  }
-};
+  };
 
   const loadContacts = async () => {
     try {
@@ -89,13 +86,10 @@ const syncUsersToLocalDatabase = async (users) => {
         const uniqueUsers = removeDuplicateUsers(response.users);
         setAllUsers(uniqueUsers);
         console.log('Loaded all users from backend:', uniqueUsers.length);
-        
-        // Sync users to local database
         await syncUsersToLocalDatabase(uniqueUsers);
       }
     } catch (error) {
       console.error('Failed to load all users:', error);
-      // Fallback to local search if backend fails
       try {
         const localUsers = await DatabaseService.searchUsers('', user.id);
         setAllUsers(localUsers);
@@ -109,15 +103,12 @@ const syncUsersToLocalDatabase = async (users) => {
     try {
       setLoading(true);
       
-      // Try backend search first
       try {
         const response = await ApiService.searchUsers(searchQuery.trim());
         if (response.success) {
           const uniqueResults = removeDuplicateUsers(response.users);
           setSearchResults(uniqueResults);
           console.log('Backend search results:', uniqueResults.length);
-          
-          // Sync search results to local database
           await syncUsersToLocalDatabase(uniqueResults);
           return;
         }
@@ -125,7 +116,6 @@ const syncUsersToLocalDatabase = async (users) => {
         console.log('Backend search failed, trying local:', backendError.message);
       }
       
-      // Fallback to local search
       const localResults = await DatabaseService.searchUsers(searchQuery.trim(), user.id);
       setSearchResults(localResults);
       console.log('Local search results:', localResults.length);
@@ -141,130 +131,123 @@ const syncUsersToLocalDatabase = async (users) => {
     }
   };
 
-const addContact = async (contactUser) => {
-  try {
-    // First, ensure the user exists in local database
-    let localUser = await DatabaseService.getUserByUsername(contactUser.username);
-    
-    if (!localUser) {
-      console.log('User not in local DB, adding:', contactUser.username);
-      // Add user to local database first
-      try {
-        await DatabaseService.db.runAsync(
-          `INSERT OR REPLACE INTO users (id, username, public_key, encrypted_private_key, salt, is_online, last_seen, created_at) 
-           VALUES (?, ?, ?, '', '', ?, ?, ?)`,
-          [
-            contactUser.id,
-            contactUser.username,
-            contactUser.public_key || contactUser.publicKey, // Handle both field names
-            contactUser.is_online ? 1 : 0,
-            contactUser.last_seen || 0,
-            Date.now()
-          ]
-        );
-        console.log('User added to local DB successfully');
-      } catch (dbError) {
-        console.error('Failed to add user to local DB:', dbError);
-        throw dbError;
+  const addContact = async (contactUser) => {
+    try {
+      let localUser = await DatabaseService.getUserByUsername(contactUser.username);
+      
+      if (!localUser) {
+        console.log('User not in local DB, adding:', contactUser.username);
+        try {
+          await DatabaseService.db.runAsync(
+            `INSERT OR REPLACE INTO users (id, username, public_key, encrypted_private_key, salt, is_online, last_seen, created_at) 
+             VALUES (?, ?, ?, '', '', ?, ?, ?)`,
+            [
+              contactUser.id,
+              contactUser.username,
+              contactUser.public_key || contactUser.publicKey,
+              contactUser.is_online ? 1 : 0,
+              contactUser.last_seen || 0,
+              Date.now()
+            ]
+          );
+          console.log('User added to local DB successfully');
+        } catch (dbError) {
+          console.error('Failed to add user to local DB:', dbError);
+          throw dbError;
+        }
       }
+      
+      await DatabaseService.addContact(user.id, contactUser.id, {
+        username: contactUser.username,
+        public_key: contactUser.public_key || contactUser.publicKey
+      });
+      
+      Alert.alert('Success', `${contactUser.username} added to contacts`);
+      loadContacts();
+    } catch (error) {
+      console.error('Add contact failed:', error);
+      Alert.alert('Error', 'Failed to add contact: ' + error.message);
     }
-    
-    // Now add as contact using the modified addContact that accepts user data
-    await DatabaseService.addContact(user.id, contactUser.id, {
-      username: contactUser.username,
-      public_key: contactUser.public_key || contactUser.publicKey
-    });
-    
-    Alert.alert('Success', `${contactUser.username} added to contacts`);
-    loadContacts();
-  } catch (error) {
-    console.error('Add contact failed:', error);
-    Alert.alert('Error', 'Failed to add contact: ' + error.message);
-  }
-};
-
-const renderUserItem = ({ item, isContact = false }) => {
-  const isContactInList = contacts.some(c => c.contact_user_id === item.id);
-  
-  return (
-    <TouchableOpacity style={styles.userItem}>
-      <View style={styles.userAvatar}>
-        <Text style={styles.userAvatarText}>
-          {item.username.charAt(0).toUpperCase()}
-        </Text>
-      </View>
-      
-      <View style={styles.userInfo}>
-        <Text style={styles.username}>{item.username}</Text>
-        <View style={styles.userStatus}>
-          <View style={[
-            styles.statusDot, 
-            { backgroundColor: item.is_online ? '#34C759' : '#999' }
-          ]} />
-          <Text style={styles.statusText}>
-            {item.is_online ? 'Online' : 'Offline'}
-          </Text>
-        </View>
-      </View>
-      
-      <View style={styles.userActions}>
-        {!isContact && !isContactInList && (
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => addContact(item)}
-          >
-            <Ionicons name="person-add" size={20} color={UI_CONFIG.COLORS.PRIMARY} />
-          </TouchableOpacity>
-        )}
-
-        {/* Replaced chat button with invitation button */}
-        <TouchableOpacity
-          style={styles.chatButton}
-          onPress={() => sendInvitation(item)}
-          disabled={loading}
-        >
-          <Ionicons 
-            name="send" 
-            size={20} 
-            color={loading ? '#999' : UI_CONFIG.COLORS.PRIMARY} 
-          />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-};
-
+  };
 
   const sendInvitation = async (contactUser) => {
-  try {
-    // Check if invitation already sent
-    const response = await ApiService.sendInvitation(contactUser.id, '');
-    
-    if (response.success) {
-      Alert.alert(
-        'Invitation Sent!',
-        `Your chat invitation has been sent to ${contactUser.username}. They need to accept it before you can start chatting.`,
-        [{ text: 'OK' }]
-      );
+    try {
+      const response = await ApiService.sendInvitation(contactUser.id, '');
+      
+      if (response.success) {
+        Alert.alert(
+          'Invitation Sent!',
+          `Your chat invitation has been sent to ${contactUser.username}. They need to accept it before you can start chatting.`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      if (error.message.includes('already sent')) {
+        Alert.alert('Info', 'You have already sent an invitation to this user.');
+      } else if (error.message.includes('already exists')) {
+        const chatId = await DatabaseService.createDirectChat(user.id, contactUser.id);
+        navigation.navigate('Chat', {
+          chatId,
+          chatName: contactUser.username,
+          recipientPublicKey: contactUser.public_key || contactUser.publicKey
+        });
+      } else {
+        Alert.alert('Error', 'Failed to send invitation: ' + error.message);
+      }
     }
-  } catch (error) {
-    if (error.message.includes('already sent')) {
-      Alert.alert('Info', 'You have already sent an invitation to this user.');
-    } else if (error.message.includes('already exists')) {
-      // If chat exists, navigate to it
-      const chatId = await DatabaseService.createDirectChat(user.id, contactUser.id);
-      navigation.navigate('Chat', {
-        chatId,
-        chatName: contactUser.username,
-        recipientPublicKey: contactUser.public_key || contactUser.publicKey
-      });
-    } else {
-      Alert.alert('Error', 'Failed to send invitation: ' + error.message);
-    }
-  }
-};
+  };
 
-  // Prepare FlatList data with unique keys
+  const renderUserItem = ({ item, isContact = false }) => {
+    const isContactInList = contacts.some(c => c.contact_user_id === item.id);
+    
+    return (
+      <TouchableOpacity style={styles.userItem}>
+        <View style={styles.userAvatar}>
+          <Text style={styles.userAvatarText}>
+            {item.username.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+        
+        <View style={styles.userInfo}>
+          <Text style={styles.username}>{item.username}</Text>
+          <View style={styles.userStatus}>
+            <View style={[
+              styles.statusDot, 
+              { backgroundColor: item.is_online ? '#34C759' : '#999' }
+            ]} />
+            <Text style={styles.statusText}>
+              {item.is_online ? 'Online' : 'Offline'}
+            </Text>
+          </View>
+        </View>
+        
+        <View style={styles.userActions}>
+          {!isContact && !isContactInList && (
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => addContact(item)}
+            >
+              <Ionicons name="person-add" size={20} color={UI_CONFIG.COLORS.PRIMARY} />
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={styles.chatButton}
+            onPress={() => sendInvitation(item)}
+            disabled={loading}
+          >
+            <Ionicons 
+              name="send" 
+              size={20} 
+              color={loading ? '#999' : UI_CONFIG.COLORS.PRIMARY} 
+            />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // FIXED: Prepare FlatList data with unique keys
   const getFlatListData = () => {
     const data = [];
     
@@ -272,8 +255,13 @@ const renderUserItem = ({ item, isContact = false }) => {
     if (searchQuery.trim().length >= 2 && searchResults.length > 0) {
       data.push({ type: 'header', title: 'Search Results', key: 'header-search' });
       const uniqueSearchResults = removeDuplicateUsers(searchResults);
-      uniqueSearchResults.forEach(user => {
-        data.push({ type: 'user', ...user, isContact: false, key: `search-${user.id}` });
+      uniqueSearchResults.forEach((user, index) => {
+        data.push({ 
+          type: 'user', 
+          ...user, 
+          isContact: false, 
+          key: `search-${user.id}-${index}` // FIXED: Added index for uniqueness
+        });
       });
     }
     
@@ -281,8 +269,13 @@ const renderUserItem = ({ item, isContact = false }) => {
     if (searchQuery.trim().length < 2 && allUsers.length > 0) {
       data.push({ type: 'header', title: 'All Users', key: 'header-all' });
       const uniqueAllUsers = removeDuplicateUsers(allUsers);
-      uniqueAllUsers.forEach(user => {
-        data.push({ type: 'user', ...user, isContact: false, key: `all-${user.id}` });
+      uniqueAllUsers.forEach((user, index) => {
+        data.push({ 
+          type: 'user', 
+          ...user, 
+          isContact: false, 
+          key: `all-${user.id}-${index}` // FIXED: Added index for uniqueness
+        });
       });
     }
     
@@ -297,7 +290,7 @@ const renderUserItem = ({ item, isContact = false }) => {
           public_key: contact.contact_public_key,
           is_online: contact.is_online,
           isContact: true,
-          key: `contact-${contact.contact_user_id}`
+          key: `contact-${contact.contact_user_id}-${index}` // FIXED: Added index for uniqueness
         });
       });
     }
@@ -355,7 +348,7 @@ const renderUserItem = ({ item, isContact = false }) => {
           }
           return renderUserItem({ item, isContact: item.isContact });
         }}
-        keyExtractor={(item) => item.key}
+        keyExtractor={(item) => item.key} // FIXED: Use unique keys
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={() => (
           <View style={styles.emptyState}>

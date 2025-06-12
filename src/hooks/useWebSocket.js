@@ -1,7 +1,8 @@
-// src/hooks/useWebSocket.js
+// src/hooks/useWebSocket.js - Enhanced with Auto-Join
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { WebSocketService } from '../services/network/WebSocketService';
 import { useAuth } from '../context/AuthContext';
+import { DatabaseService } from '../services/database/DatabaseService';
 import { API_CONFIG } from '../utils/constants';
 
 export function useWebSocket() {
@@ -12,6 +13,7 @@ export function useWebSocket() {
   const { user } = useAuth();
   const messageHandlersRef = useRef(new Set());
   const typingHandlersRef = useRef(new Set());
+  const hasAutoJoinedRef = useRef(false);
 
   useEffect(() => {
     if (user) {
@@ -23,13 +25,55 @@ export function useWebSocket() {
     };
   }, [user]);
 
+  // Auto-join all user chats when connected
+  useEffect(() => {
+    if (isConnected && user && !hasAutoJoinedRef.current) {
+      autoJoinUserChats();
+      hasAutoJoinedRef.current = true;
+    }
+  }, [isConnected, user]);
+
+  const autoJoinUserChats = async () => {
+    try {
+      console.log('🔄 Auto-joining user chats...');
+      
+      // Get all user's chats from local database
+      const userChats = await DatabaseService.getUserChats(user.id);
+      
+      if (userChats.length === 0) {
+        console.log('📭 No chats found to join');
+        return;
+      }
+
+      // Join each chat room
+      for (const chat of userChats) {
+        console.log(`🚪 Auto-joining chat: ${chat.name} (ID: ${chat.id})`);
+        WebSocketService.joinChat(chat.id);
+        
+        // Small delay to avoid overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      console.log(`✅ Auto-joined ${userChats.length} chats`);
+    } catch (error) {
+      console.error('❌ Failed to auto-join chats:', error);
+    }
+  };
+
+  // Re-join chats when new ones are created
+  const joinNewChat = useCallback((chatId) => {
+    if (isConnected) {
+      console.log(`🆕 Joining new chat: ${chatId}`);
+      WebSocketService.joinChat(chatId);
+    }
+  }, [isConnected]);
+
   const connectWebSocket = useCallback(async () => {
     if (!user) return;
 
     try {
       setConnectionStatus('connecting');
       
-      // Only connect if WebSocket URL is properly configured
       const wsUrl = API_CONFIG.WS_URL;
       
       if (!wsUrl || wsUrl.includes('your-server.com') || wsUrl.includes('your-websocket-server.com')) {
@@ -40,20 +84,19 @@ export function useWebSocket() {
       }
 
       if (!wsUrl || wsUrl.includes('192.168.1.108') && wsUrl.includes('3001')) {
-      // Check if server is actually running
         const testResponse = await fetch('http://192.168.1.108:3001/health').catch(() => null);
-          if (!testResponse || !testResponse.ok) {
-            console.log('WebSocket disabled - backend server not reachable');
-            setConnectionStatus('disabled');
+        if (!testResponse || !testResponse.ok) {
+          console.log('WebSocket disabled - backend server not reachable');
+          setConnectionStatus('disabled');
           return;
+        }
       }
-    }
 
       // Connect to WebSocket server
       WebSocketService.connect(
         wsUrl,
         user.id,
-        'demo-token' // Replace with actual auth token
+        user.username // Pass username instead of token
       );
 
       // Set up event handlers
@@ -70,12 +113,18 @@ export function useWebSocket() {
           setConnectionStatus('disabled');
         } else if (status.connected) {
           setConnectionStatus('connected');
+          
+          // Auto-join chats when connection is established
+          if (!hasAutoJoinedRef.current) {
+            autoJoinUserChats();
+            hasAutoJoinedRef.current = true;
+          }
         } else {
           setConnectionStatus('connecting');
+          hasAutoJoinedRef.current = false; // Reset auto-join flag
         }
       }, 1000);
 
-      // Clean up interval
       return () => clearInterval(statusInterval);
       
     } catch (error) {
@@ -89,9 +138,11 @@ export function useWebSocket() {
     WebSocketService.disconnect();
     setIsConnected(false);
     setConnectionStatus('disconnected');
+    hasAutoJoinedRef.current = false;
   }, []);
 
   const handleIncomingMessage = useCallback((messageData) => {
+    console.log('📨 Received message for chat:', messageData.chatId);
     setLastMessage(messageData);
     
     // Notify all registered message handlers
@@ -133,8 +184,7 @@ export function useWebSocket() {
   }, []);
 
   const handleMessageDelivery = useCallback((data) => {
-    // Handle message delivery confirmation
-    console.log('Message delivered:', data);
+    console.log('✅ Message delivered:', data);
   }, []);
 
   // Send message (works even if WebSocket is disabled)
@@ -151,19 +201,19 @@ export function useWebSocket() {
     WebSocketService.sendMessage(messageData);
   }, [isConnected, connectionStatus]);
 
-  // Join chat room
+  // Join specific chat room (for when user opens a chat)
   const joinChat = useCallback((chatId) => {
     if (connectionStatus !== 'disabled') {
       WebSocketService.joinChat(chatId);
     }
   }, [connectionStatus]);
 
-  // Leave chat room
+  // Leave chat room (for when user closes a chat)
   const leaveChat = useCallback((chatId) => {
-    if (connectionStatus !== 'disabled') {
-      WebSocketService.leaveChat(chatId);
-    }
-  }, [connectionStatus]);
+    // Note: We don't actually leave the room anymore to ensure message delivery
+    // Users stay joined to all their chats for real-time updates
+    console.log(`📌 Keeping user in chat ${chatId} for message delivery`);
+  }, []);
 
   // Send typing indicator
   const sendTypingIndicator = useCallback((chatId, isTyping) => {
@@ -176,7 +226,6 @@ export function useWebSocket() {
   const onMessage = useCallback((handler) => {
     messageHandlersRef.current.add(handler);
     
-    // Return unsubscribe function
     return () => {
       messageHandlersRef.current.delete(handler);
     };
@@ -186,7 +235,6 @@ export function useWebSocket() {
   const onTyping = useCallback((handler) => {
     typingHandlersRef.current.add(handler);
     
-    // Return unsubscribe function
     return () => {
       typingHandlersRef.current.delete(handler);
     };
@@ -198,7 +246,6 @@ export function useWebSocket() {
     const now = Date.now();
     const activeTyping = {};
 
-    // Filter out old typing indicators (older than 5 seconds)
     Object.entries(chatTyping).forEach(([userId, data]) => {
       if (now - data.timestamp < 5000) {
         activeTyping[userId] = data;
@@ -210,22 +257,10 @@ export function useWebSocket() {
 
   // Reconnect manually
   const reconnect = useCallback(() => {
+    hasAutoJoinedRef.current = false;
     disconnectWebSocket();
     setTimeout(connectWebSocket, 1000);
   }, [connectWebSocket, disconnectWebSocket]);
-
-  // Enable WebSocket for development
-  const enableWebSocket = useCallback(() => {
-    WebSocketService.enableWebSocket();
-    connectWebSocket();
-  }, [connectWebSocket]);
-
-  // Disable WebSocket for development
-  const disableWebSocket = useCallback(() => {
-    WebSocketService.disableWebSocket();
-    setConnectionStatus('disabled');
-    setIsConnected(false);
-  }, []);
 
   return {
     isConnected,
@@ -241,7 +276,7 @@ export function useWebSocket() {
     reconnect,
     connect: connectWebSocket,
     disconnect: disconnectWebSocket,
-    enableWebSocket,
-    disableWebSocket
+    joinNewChat, // Export this for when new chats are created
+    autoJoinUserChats // Export for manual triggering if needed
   };
 }

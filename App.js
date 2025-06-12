@@ -1,4 +1,4 @@
-// App.js - Fixed AppState Event Listener
+// App.js - Fixed Version without Timeout
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
@@ -26,61 +26,57 @@ export default function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [initProgress, setInitProgress] = useState('Starting...');
 
   useEffect(() => {
     initializeApp();
     
-    // Fixed AppState event listener for newer React Native versions
+    // AppState event listener for background/foreground
     const handleAppStateChange = (nextAppState) => {
       if (nextAppState === 'background') {
-        // Clear sensitive data when app goes to background
-        console.log('🔒 App moved to background - sensitive data would be cleared');
-        // Note: CryptoService.clearCache() would be called here if available
+        console.log('🔒 App moved to background');
+      } else if (nextAppState === 'active') {
+        console.log('🔓 App became active');
       }
     };
 
-    // Use the new event listener API
     const subscription = AppState.addEventListener('change', handleAppStateChange);
 
-    // Cleanup function
     return () => {
       if (subscription?.remove) {
         subscription.remove();
       } else {
-        // Fallback for older versions
         AppState.removeEventListener?.('change', handleAppStateChange);
       }
     };
   }, []);
 
   const initializeApp = async () => {
-    const timeout = setTimeout(() => {
-      console.error('⏰ Database initialization timeout (10 seconds)');
-      setInitError(new Error('Initialization timed out. Please try again.'));
-    }, 10000); // 10 second timeout
-
     try {
       setInitError(null);
       setIsRetrying(false);
+      setInitProgress('Starting initialization...');
       
       console.log('🚀 Starting app initialization...');
       
-      // Initialize database with timeout protection
+      // Initialize database without timeout - let it take as long as needed
+      setInitProgress('Initializing database...');
       await DatabaseService.init();
       
-      clearTimeout(timeout);
+      setInitProgress('Database ready!');
       console.log('🎉 App initialization completed');
       setIsInitialized(true);
       
     } catch (error) {
-      clearTimeout(timeout);
       console.error('💥 App initialization failed:', error);
       setInitError(error);
+      setInitProgress('Initialization failed');
     }
   };
 
   const retryInitialization = async () => {
     setIsRetrying(true);
+    setInitProgress('Retrying...');
     await initializeApp();
     setIsRetrying(false);
   };
@@ -88,31 +84,42 @@ export default function App() {
   const resetAndRetry = async () => {
     try {
       setIsRetrying(true);
+      setInitProgress('Resetting database...');
       console.log('🔄 Resetting database...');
       
       await DatabaseService.resetDatabase();
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setInitProgress('Reinitializing...');
       await initializeApp();
       
     } catch (error) {
       console.error('❌ Reset failed:', error);
       setInitError(error);
+      setInitProgress('Reset failed');
     } finally {
       setIsRetrying(false);
     }
   };
 
+  // Show loading screen while initializing
   if (!isInitialized && !initError) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <LoadingSpinner text="Starting SecureChat..." />
+        <LoadingSpinner text={initProgress} />
         <Text style={styles.loadingHint}>
-          This should take only a few seconds
+          Setting up your secure database...
         </Text>
+        {isRetrying && (
+          <Text style={styles.retryText}>
+            This may take a moment on first launch
+          </Text>
+        )}
       </SafeAreaView>
     );
   }
 
+  // Show error screen if initialization failed
   if (initError) {
     return (
       <SafeAreaView style={styles.errorContainer}>
@@ -120,6 +127,10 @@ export default function App() {
           <Text style={styles.errorTitle}>Startup Failed</Text>
           <Text style={styles.errorMessage}>
             {initError.message || 'Failed to initialize the app'}
+          </Text>
+          
+          <Text style={styles.errorDetails}>
+            Current status: {initProgress}
           </Text>
           
           <View style={styles.errorActions}>
@@ -131,7 +142,7 @@ export default function App() {
             />
             
             <Button
-              title={isRetrying ? "Resetting..." : "Reset & Retry"}
+              title={isRetrying ? "Resetting..." : "Reset Database"}
               onPress={resetAndRetry}
               disabled={isRetrying}
               variant="secondary"
@@ -140,13 +151,14 @@ export default function App() {
           </View>
           
           <Text style={styles.errorHint}>
-            If this keeps happening, restart the app completely.
+            If this keeps happening, try restarting the app completely.
           </Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  // App successfully initialized
   return (
     <NavigationContainer>
       <AuthProvider>
@@ -174,6 +186,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontStyle: 'italic'
   },
+  retryText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic'
+  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -197,8 +216,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
     lineHeight: 22
+  },
+  errorDetails: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    marginBottom: 24,
+    fontStyle: 'italic'
   },
   errorActions: {
     width: '100%',
