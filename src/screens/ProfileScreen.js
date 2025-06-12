@@ -1,4 +1,4 @@
-// src/screens/ProfileScreen.js - Complete with Biometric Debug
+// src/screens/ProfileScreen.js - Updated with WebSocket Debug
 import { useState } from 'react';
 import {
   View,
@@ -16,11 +16,11 @@ import { Button } from '../components/ui/Button';
 import { BiometricSettings } from '../components/settings/BiometricSettings';
 import { BiometricDebug } from '../components/debug/BiometricDebug';
 import { StorageDebug } from '../components/debug/StorageDebug';
+import { WebSocketDebug } from '../components/debug/WebSocketDebug';
 import { useAuth } from '../context/AuthContext';
 import { DatabaseService } from '../services/database/DatabaseService';
 import { Storage } from '../utils/storage';
 import { UI_CONFIG } from '../utils/constants';
-import { WebSocketService } from '../services/network/WebSocketService';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -77,44 +77,6 @@ export default function ProfileScreen() {
       ]
     );
   };
-
-  const WebSocketDebug = () => {
-  const [wsStatus, setWsStatus] = useState(null);
-
-  const checkWebSocketStatus = () => {
-    const status = WebSocketService.getDebugInfo();
-    setWsStatus(status);
-  };
-
-  const forceRejoin = async () => {
-    await WebSocketService.forceRejoinChats();
-    checkWebSocketStatus();
-    Alert.alert('Success', 'Forced rejoin of all chats');
-  };
-
-  return (
-    <View style={styles.debugContainer}>
-      <Text style={styles.debugTitle}>🌐 WebSocket Debug</Text>
-      
-      <TouchableOpacity style={styles.button} onPress={checkWebSocketStatus}>
-        <Text style={styles.buttonText}>Check Status</Text>
-      </TouchableOpacity>
-      
-      {wsStatus && (
-        <View style={styles.statusContainer}>
-          <Text>Connected: {wsStatus.isConnected ? '✅' : '❌'}</Text>
-          <Text>Auto-join Done: {wsStatus.autoJoinCompleted ? '✅' : '❌'}</Text>
-          <Text>Joined Chats: {wsStatus.joinedChats.length}</Text>
-          <Text>User ID: {wsStatus.userId}</Text>
-        </View>
-      )}
-      
-      <TouchableOpacity style={styles.button} onPress={forceRejoin}>
-        <Text style={styles.buttonText}>Force Rejoin Chats</Text>
-      </TouchableOpacity>
-    </View>
-  );
-};
 
   const SettingItem = ({ title, subtitle, icon, onPress, rightComponent }) => (
     <TouchableOpacity style={styles.settingItem} onPress={onPress}>
@@ -243,6 +205,22 @@ export default function ProfileScreen() {
           />
         </View>
 
+        {/* Debug Tools Section */}
+        {showDebugTools && (
+          <View style={styles.debugSection}>
+            <Text style={styles.debugSectionTitle}>🔧 Debug Information</Text>
+            
+            {/* WebSocket Debug - Most Important */}
+            <WebSocketDebug />
+            
+            {/* Biometric Debug */}
+            <BiometricDebug />
+            
+            {/* Storage Debug */}
+            <StorageDebug />
+          </View>
+        )}
+
         <View style={styles.dangerSection}>
           <Button
             title="Sign Out"
@@ -263,13 +241,6 @@ export default function ProfileScreen() {
             style={styles.resetButton}
           />
         </View>
-        
-        {showDebugTools && (
-          <>
-            <BiometricDebug />
-            <StorageDebug />
-          </>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -361,6 +332,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: UI_CONFIG.COLORS.TEXT_SECONDARY,
     marginTop: 2
+  },
+  debugSection: {
+    marginTop: UI_CONFIG.SPACING.LG,
+    paddingHorizontal: UI_CONFIG.SPACING.MD
+  },
+  debugSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: UI_CONFIG.COLORS.TEXT,
+    marginBottom: UI_CONFIG.SPACING.MD,
+    textAlign: 'center'
   },
   dangerSection: {
     paddingHorizontal: UI_CONFIG.SPACING.MD,

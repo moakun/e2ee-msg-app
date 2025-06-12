@@ -1,4 +1,4 @@
-// src/services/network/WebSocketService.js - FIXED Auto-Join
+// src/services/network/WebSocketService.js - FIXED Message Delivery
 import io from 'socket.io-client';
 import { NetworkOptimizer } from './NetworkOptimizer';
 import { Storage } from '../../utils/storage';
@@ -9,7 +9,7 @@ class WebSocketServiceClass {
     this.isConnected = false;
     this.messageQueue = [];
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 3;
+    this.maxReconnectAttempts = 5;
     this.networkOptimizer = new NetworkOptimizer();
     this.isEnabled = false;
     this.authToken = null;
@@ -18,12 +18,15 @@ class WebSocketServiceClass {
     this.userId = null;
     this.username = null;
     this.autoJoinCompleted = false;
+    this.autoJoinRetries = 0;
+    this.maxAutoJoinRetries = 3;
   }
 
   async connect(serverUrl, userId, username) {
     this.userId = userId;
     this.username = username;
     this.autoJoinCompleted = false;
+    this.autoJoinRetries = 0;
 
     if (!serverUrl || serverUrl.includes('your-server.com')) {
       console.log('WebSocket disabled: No server configured');
@@ -50,7 +53,8 @@ class WebSocketServiceClass {
         },
         transports: ['websocket'],
         timeout: 20000,
-        autoConnect: false
+        autoConnect: false,
+        forceNew: true // Force new connection to avoid stale state
       });
 
       this.setupEventListeners();
@@ -83,10 +87,9 @@ class WebSocketServiceClass {
       if (data.success) {
         console.log('✅ WebSocket authentication successful');
         
-        // IMPORTANT: Auto-join ALL user chats immediately after authentication
+        // CRITICAL FIX: Auto-join with retry mechanism
         if (!this.autoJoinCompleted) {
-          await this.autoJoinUserChats();
-          this.autoJoinCompleted = true;
+          await this.autoJoinUserChatsWithRetry();
         }
       } else {
         console.error('❌ WebSocket authentication failed');
@@ -99,6 +102,7 @@ class WebSocketServiceClass {
       this.isConnected = false;
       this.joinedChats.clear();
       this.autoJoinCompleted = false;
+      this.autoJoinRetries = 0;
       
       if (reason !== 'io client disconnect') {
         this.handleReconnection();
@@ -116,6 +120,11 @@ class WebSocketServiceClass {
       this.joinedChats.add(data.chatId.toString());
     });
 
+    // NEW: Handle join failures
+    this.socket.on('join_chat_error', (data) => {
+      console.error(`❌ Failed to join chat ${data.chatId}: ${data.error}`);
+    });
+
     this.socket.on('message_delivered', (data) => {
       this.handleMessageDelivery(data);
     });
@@ -127,13 +136,47 @@ class WebSocketServiceClass {
     this.socket.on('error', (error) => {
       console.error('❌ WebSocket error:', error);
     });
+
+    // NEW: Handle connection state changes
+    this.socket.on('connect_error', (error) => {
+      console.error('❌ WebSocket connection error:', error);
+      this.handleReconnection();
+    });
   }
 
-  // FIXED: Auto-join all user chats with proper error handling
+  // FIXED: Auto-join with proper retry mechanism
+  async autoJoinUserChatsWithRetry() {
+    for (let attempt = 0; attempt < this.maxAutoJoinRetries; attempt++) {
+      try {
+        console.log(`🔄 Auto-join attempt ${attempt + 1}/${this.maxAutoJoinRetries}`);
+        
+        const success = await this.autoJoinUserChats();
+        if (success) {
+          this.autoJoinCompleted = true;
+          this.autoJoinRetries = 0;
+          return;
+        }
+        
+        // Wait before retry
+        if (attempt < this.maxAutoJoinRetries - 1) {
+          console.log(`⏳ Waiting 2s before retry...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        
+      } catch (error) {
+        console.error(`❌ Auto-join attempt ${attempt + 1} failed:`, error);
+      }
+    }
+    
+    console.error('❌ All auto-join attempts failed');
+    this.autoJoinCompleted = true; // Stop retrying
+  }
+
+  // IMPROVED: Auto-join with better error handling and verification
   async autoJoinUserChats() {
     if (!this.isConnected || !this.userId) {
       console.log('❌ Cannot auto-join: not connected or no user ID');
-      return;
+      return false;
     }
 
     try {
@@ -148,38 +191,92 @@ class WebSocketServiceClass {
       
       if (userChats.length === 0) {
         console.log('📭 No chats found for auto-join');
-        this.autoJoinCompleted = true;
-        return;
+        return true;
       }
 
-      // Join each chat with delay to avoid overwhelming server
+      // Join each chat with proper verification
+      let successCount = 0;
+      
       for (const chat of userChats) {
-        const chatIdStr = chat.id.toString();
-        
-        if (!this.joinedChats.has(chatIdStr)) {
+        try {
+          const chatIdStr = chat.id.toString();
+          
+          if (this.joinedChats.has(chatIdStr)) {
+            console.log(`⏭️ Already in chat: ${chat.id}`);
+            successCount++;
+            continue;
+          }
+          
           console.log(`🚪 Auto-joining chat: "${chat.name}" (ID: ${chat.id})`);
           
-          // Emit join_chat event
-          this.socket.emit('join_chat', { chatId: chat.id });
+          // Join chat and wait for confirmation
+          const joinSuccess = await this.joinChatAndWait(chat.id);
           
-          // Optimistically add to joined set
-          this.joinedChats.add(chatIdStr);
+          if (joinSuccess) {
+            successCount++;
+            console.log(`✅ Successfully joined: ${chat.name}`);
+          } else {
+            console.error(`❌ Failed to join: ${chat.name}`);
+          }
           
-          // Small delay between joins
-          await new Promise(resolve => setTimeout(resolve, 200));
-        } else {
-          console.log(`⏭️ Already in chat: ${chat.id}`);
+          // Delay between joins to avoid overwhelming server
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+        } catch (error) {
+          console.error(`❌ Error joining chat ${chat.id}:`, error);
         }
       }
       
-      console.log(`✅ Auto-join completed! Joined ${userChats.length} chats`);
-      console.log(`📊 Total joined chats: ${this.joinedChats.size}`);
-      this.autoJoinCompleted = true;
+      console.log(`📊 Auto-join completed: ${successCount}/${userChats.length} chats joined`);
+      return successCount === userChats.length;
       
     } catch (error) {
       console.error('❌ Auto-join failed:', error);
-      this.autoJoinCompleted = true; // Prevent infinite retries
+      return false;
     }
+  }
+
+  // NEW: Join chat with confirmation wait
+  async joinChatAndWait(chatId, timeout = 5000) {
+    return new Promise((resolve) => {
+      const chatIdStr = chatId.toString();
+      
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        console.warn(`⏰ Timeout waiting for join confirmation for chat ${chatId}`);
+        this.socket.off('joined_chat', joinHandler);
+        this.socket.off('join_chat_error', errorHandler);
+        resolve(false);
+      }, timeout);
+      
+      // Join success handler
+      const joinHandler = (data) => {
+        if (data.chatId.toString() === chatIdStr) {
+          clearTimeout(timeoutId);
+          this.socket.off('joined_chat', joinHandler);
+          this.socket.off('join_chat_error', errorHandler);
+          this.joinedChats.add(chatIdStr);
+          resolve(true);
+        }
+      };
+      
+      // Join error handler
+      const errorHandler = (data) => {
+        if (data.chatId.toString() === chatIdStr) {
+          clearTimeout(timeoutId);
+          this.socket.off('joined_chat', joinHandler);
+          this.socket.off('join_chat_error', errorHandler);
+          resolve(false);
+        }
+      };
+      
+      // Set up listeners
+      this.socket.on('joined_chat', joinHandler);
+      this.socket.on('join_chat_error', errorHandler);
+      
+      // Send join request
+      this.socket.emit('join_chat', { chatId });
+    });
   }
 
   sendMessage(messageData) {
@@ -204,26 +301,27 @@ class WebSocketServiceClass {
     }
   }
 
-  joinChat(chatId) {
-    if (!this.isEnabled) return;
+  // IMPROVED: Manual join with auto-retry
+  async joinChat(chatId) {
+    if (!this.isEnabled) return false;
     
     const chatIdStr = chatId.toString();
     
     if (this.joinedChats.has(chatIdStr)) {
       console.log(`⏭️ Already joined chat: ${chatId}`);
-      return;
+      return true;
     }
     
     if (this.isConnected && this.socket) {
       console.log(`🚪 Manually joining chat: ${chatId}`);
-      this.socket.emit('join_chat', { chatId });
-      this.joinedChats.add(chatIdStr);
+      return await this.joinChatAndWait(chatId);
     } else {
       this.messageQueue.push({
         type: 'join_chat',
         data: { chatId },
         timestamp: Date.now()
       });
+      return false;
     }
   }
 
@@ -238,6 +336,7 @@ class WebSocketServiceClass {
     this.socket.emit('typing', { chatId, isTyping });
   }
 
+  // IMPROVED: Better duplicate message handling
   handleIncomingMessage(data) {
     const messageId = data.messageId || `${data.timestamp}_${data.senderId}`;
     
@@ -247,9 +346,11 @@ class WebSocketServiceClass {
     }
     
     this.processedMessages.add(messageId);
-    if (this.processedMessages.size > 100) {
-      const firstId = this.processedMessages.values().next().value;
-      this.processedMessages.delete(firstId);
+    
+    // Clean up old processed messages to prevent memory leak
+    if (this.processedMessages.size > 1000) {
+      const messagesToRemove = Array.from(this.processedMessages).slice(0, 500);
+      messagesToRemove.forEach(id => this.processedMessages.delete(id));
     }
     
     console.log(`📨 Processing new message from ${data.senderUsername} in chat ${data.chatId}`);
@@ -271,36 +372,48 @@ class WebSocketServiceClass {
     }
   }
 
+  // IMPROVED: Better queue processing
   processMessageQueue() {
     console.log(`📦 Processing ${this.messageQueue.length} queued messages`);
     
-    while (this.messageQueue.length > 0) {
-      const queuedMessage = this.messageQueue.shift();
-      
+    const currentQueue = [...this.messageQueue];
+    this.messageQueue = [];
+    
+    currentQueue.forEach(queuedMessage => {
+      // Only process messages that aren't too old (5 minutes)
       if (Date.now() - queuedMessage.timestamp < 300000) {
-        this.socket.emit(queuedMessage.type, queuedMessage.data);
-        
         if (queuedMessage.type === 'join_chat') {
-          this.joinedChats.add(queuedMessage.data.chatId.toString());
+          // Use the improved join method
+          this.joinChat(queuedMessage.data.chatId);
+        } else {
+          this.socket.emit(queuedMessage.type, queuedMessage.data);
         }
+      } else {
+        console.log('⏰ Discarded old queued message:', queuedMessage.type);
       }
-    }
+    });
   }
 
+  // IMPROVED: Better reconnection handling
   handleReconnection() {
     if (!this.isEnabled) return;
     
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
+      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 15000);
+      
+      console.log(`🔄 Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
       
       setTimeout(() => {
         if (this.isEnabled && this.socket && !this.isConnected) {
           console.log(`🔄 Reconnection attempt ${this.reconnectAttempts}`);
           this.autoJoinCompleted = false; // Reset auto-join on reconnect
+          this.autoJoinRetries = 0;
           this.socket.connect();
         }
       }, delay);
+    } else {
+      console.error('❌ Max reconnection attempts reached');
     }
   }
 
@@ -320,6 +433,7 @@ class WebSocketServiceClass {
     this.processedMessages.clear();
     this.joinedChats.clear();
     this.autoJoinCompleted = false;
+    this.autoJoinRetries = 0;
     this.userId = null;
     this.username = null;
   }
@@ -337,7 +451,18 @@ class WebSocketServiceClass {
     this.onTypingIndicator = handler;
   }
 
-  // Debug methods
+  // NEW: Method to manually rejoin a specific chat
+  async rejoinChat(chatId) {
+    const chatIdStr = chatId.toString();
+    
+    // Remove from joined set to force rejoin
+    this.joinedChats.delete(chatIdStr);
+    
+    // Join again
+    return await this.joinChat(chatId);
+  }
+
+  // IMPROVED: Debug methods
   getConnectionStatus() {
     return {
       enabled: this.isEnabled,
@@ -346,7 +471,9 @@ class WebSocketServiceClass {
       joinedChats: Array.from(this.joinedChats),
       joinedChatsCount: this.joinedChats.size,
       userId: this.userId,
-      hasToken: !!this.authToken
+      hasToken: !!this.authToken,
+      reconnectAttempts: this.reconnectAttempts,
+      autoJoinRetries: this.autoJoinRetries
     };
   }
 
@@ -355,7 +482,8 @@ class WebSocketServiceClass {
     console.log('🔄 Force rejoining all chats...');
     this.joinedChats.clear();
     this.autoJoinCompleted = false;
-    await this.autoJoinUserChats();
+    this.autoJoinRetries = 0;
+    await this.autoJoinUserChatsWithRetry();
   }
 
   // Check if in specific chat
@@ -373,8 +501,19 @@ class WebSocketServiceClass {
       queuedMessages: this.messageQueue.length,
       processedMessages: this.processedMessages.size,
       userId: this.userId,
-      username: this.username
+      username: this.username,
+      reconnectAttempts: this.reconnectAttempts,
+      autoJoinRetries: this.autoJoinRetries
     };
+  }
+
+  // NEW: Method to ensure user is in a chat before sending
+  async ensureInChat(chatId) {
+    if (!this.isInChat(chatId)) {
+      console.log(`🔄 User not in chat ${chatId}, joining...`);
+      return await this.joinChat(chatId);
+    }
+    return true;
   }
 }
 
