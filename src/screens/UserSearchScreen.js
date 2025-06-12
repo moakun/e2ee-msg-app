@@ -6,14 +6,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  RefreshControl,
   TextInput,
-  Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
-import { Button } from '../components/ui/Button';
 import { useAuth } from '../context/AuthContext';
 import { ApiService } from '../services/network/ApiService';
 import { DatabaseService } from '../services/database/DatabaseService';
@@ -51,42 +48,28 @@ export default function UserSearchScreen({ navigation }) {
   };
 
   // Sync users to local database
-  const syncUsersToLocalDatabase = async (users) => {
-    for (const user of users) {
-      try {
-        // Check if user exists locally
-        const existingUser = await DatabaseService.getUserByUsername(user.username);
-        
-        if (!existingUser) {
-          // Create user in local database (without encrypted_private_key since we don't have it)
-          await DatabaseService.db.runAsync(
-            `INSERT OR IGNORE INTO users 
-             (id, username, public_key, encrypted_private_key, salt, is_online, last_seen, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id,
-              user.username,
-              user.public_key,
-              '', // empty encrypted_private_key for remote users
-              '', // empty salt for remote users
-              user.is_online ? 1 : 0,
-              user.last_seen || 0,
-              Date.now()
-            ]
-          );
-          console.log(`✅ Synced user ${user.username} to local database`);
-        } else {
-          // Update existing user's online status
-          await DatabaseService.db.runAsync(
-            'UPDATE users SET is_online = ?, last_seen = ? WHERE id = ?',
-            [user.is_online ? 1 : 0, user.last_seen || Date.now(), user.id]
-          );
-        }
-      } catch (error) {
-        console.error(`Failed to sync user ${user.username}:`, error);
+const syncUsersToLocalDatabase = async (users) => {
+  for (const user of users) {
+    try {
+      // Check if user exists locally
+      const existingUser = await DatabaseService.getUserById(user.id);
+      
+      if (!existingUser) {
+        // Create user with backend ID
+        await DatabaseService.createUser({
+          id: user.id,  // Important: use backend ID
+          username: user.username,
+          publicKey: user.public_key,
+          encryptedPrivateKey: '',
+          salt: ''
+        });
+        console.log(`✅ Synced user ${user.username} to local database`);
       }
+    } catch (error) {
+      console.error(`Failed to sync user ${user.username}:`, error);
     }
-  };
+  }
+};
 
   const loadContacts = async () => {
     try {
@@ -200,88 +183,86 @@ const addContact = async (contactUser) => {
   }
 };
 
-const startChat = async (contactUser) => {
-  try {
-    setLoading(true);
-    console.log('🚀 Starting chat with:', contactUser.username);
-    
-    // Ensure chat exists in local database
-    const chatId = await DatabaseService.createDirectChat(user.id, contactUser.id);
-    console.log('💬 Chat created/found with ID:', chatId);
-    
-    // Try to sync with backend (but don't fail if it doesn't work)
-    try {
-      const response = await ApiService.createDirectChat(contactUser.id);
-      if (response.success) {
-        console.log('✅ Chat synced with backend');
-      }
-    } catch (backendError) {
-      console.log('⚠️ Backend sync failed, continuing with local chat:', backendError.message);
-    }
-    
-    navigation.navigate('Chat', {
-      chatId,
-      chatName: contactUser.username,
-      recipientPublicKey: contactUser.public_key || contactUser.publicKey
-    });
-    
-  } catch (error) {
-    console.error('❌ Create chat failed:', error);
-    Alert.alert('Error', 'Failed to create chat: ' + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  const renderUserItem = ({ item, isContact = false }) => {
-    const isContactInList = contacts.some(c => c.contact_user_id === item.id);
-    
-    return (
-      <TouchableOpacity style={styles.userItem}>
-        <View style={styles.userAvatar}>
-          <Text style={styles.userAvatarText}>
-            {item.username.charAt(0).toUpperCase()}
+const renderUserItem = ({ item, isContact = false }) => {
+  const isContactInList = contacts.some(c => c.contact_user_id === item.id);
+  
+  return (
+    <TouchableOpacity style={styles.userItem}>
+      <View style={styles.userAvatar}>
+        <Text style={styles.userAvatarText}>
+          {item.username.charAt(0).toUpperCase()}
+        </Text>
+      </View>
+      
+      <View style={styles.userInfo}>
+        <Text style={styles.username}>{item.username}</Text>
+        <View style={styles.userStatus}>
+          <View style={[
+            styles.statusDot, 
+            { backgroundColor: item.is_online ? '#34C759' : '#999' }
+          ]} />
+          <Text style={styles.statusText}>
+            {item.is_online ? 'Online' : 'Offline'}
           </Text>
         </View>
-        
-        <View style={styles.userInfo}>
-          <Text style={styles.username}>{item.username}</Text>
-          <View style={styles.userStatus}>
-            <View style={[
-              styles.statusDot, 
-              { backgroundColor: item.is_online ? '#34C759' : '#999' }
-            ]} />
-            <Text style={styles.statusText}>
-              {item.is_online ? 'Online' : 'Offline'}
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.userActions}>
-          {!isContact && !isContactInList && (
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => addContact(item)}
-            >
-              <Ionicons name="person-add" size={20} color={UI_CONFIG.COLORS.PRIMARY} />
-            </TouchableOpacity>
-          )}
-          
+      </View>
+      
+      <View style={styles.userActions}>
+        {!isContact && !isContactInList && (
           <TouchableOpacity
-            style={styles.chatButton}
-            onPress={() => startChat(item)}
-            disabled={loading}
+            style={styles.addButton}
+            onPress={() => addContact(item)}
           >
-            <Ionicons 
-              name="chatbubble" 
-              size={20} 
-              color={loading ? '#999' : UI_CONFIG.COLORS.PRIMARY} 
-            />
+            <Ionicons name="person-add" size={20} color={UI_CONFIG.COLORS.PRIMARY} />
           </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+        )}
+
+        {/* Replaced chat button with invitation button */}
+        <TouchableOpacity
+          style={styles.chatButton}
+          onPress={() => sendInvitation(item)}
+          disabled={loading}
+        >
+          <Ionicons 
+            name="send" 
+            size={20} 
+            color={loading ? '#999' : UI_CONFIG.COLORS.PRIMARY} 
+          />
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+
+  const sendInvitation = async (contactUser) => {
+  try {
+    // Check if invitation already sent
+    const response = await ApiService.sendInvitation(contactUser.id, '');
+    
+    if (response.success) {
+      Alert.alert(
+        'Invitation Sent!',
+        `Your chat invitation has been sent to ${contactUser.username}. They need to accept it before you can start chatting.`,
+        [{ text: 'OK' }]
+      );
+    }
+  } catch (error) {
+    if (error.message.includes('already sent')) {
+      Alert.alert('Info', 'You have already sent an invitation to this user.');
+    } else if (error.message.includes('already exists')) {
+      // If chat exists, navigate to it
+      const chatId = await DatabaseService.createDirectChat(user.id, contactUser.id);
+      navigation.navigate('Chat', {
+        chatId,
+        chatName: contactUser.username,
+        recipientPublicKey: contactUser.public_key || contactUser.publicKey
+      });
+    } else {
+      Alert.alert('Error', 'Failed to send invitation: ' + error.message);
+    }
+  }
+};
 
   // Prepare FlatList data with unique keys
   const getFlatListData = () => {

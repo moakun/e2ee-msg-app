@@ -1,7 +1,9 @@
+// src/components/auth/RegisterForm.js - Simplified
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
+import { BiometricAuthService } from '../../services/auth/BiometricAuthService';
 import { useAuth } from '../../context/AuthContext';
 import { UI_CONFIG } from '../../utils/constants';
 
@@ -35,13 +37,53 @@ export function RegisterForm({ onSwitchToLogin }) {
   const handleRegister = async () => {
     if (!validateForm()) return;
     
-    // Set loading state immediately
     setIsSubmitting(true);
     
     try {
-      await register(username.trim(), password);
+      const success = await register(username.trim(), password);
+      
+      if (success !== false) {
+        // Registration successful
+        console.log('Registration successful');
+        
+        // Check if biometric is available
+        const biometricAvailable = await BiometricAuthService.isAvailable();
+        
+        if (biometricAvailable.available) {
+          // Get the derived key from storage
+          const Storage = require('../../utils/storage').Storage;
+          const derivedKey = await Storage.getSecureString('derivedKey');
+          
+          if (derivedKey) {
+            Alert.alert(
+              'Enable Biometric Login?',
+              'Would you like to use fingerprint/Face ID for faster login?',
+              [
+                {
+                  text: 'Not Now',
+                  style: 'cancel'
+                },
+                {
+                  text: 'Enable',
+                  onPress: async () => {
+                    const registered = await BiometricAuthService.registerBiometricCredentials(
+                      username.trim(),
+                      derivedKey
+                    );
+                    
+                    if (registered) {
+                      Alert.alert('Success', 'Biometric login enabled! You can now login with your fingerprint/Face ID.');
+                    }
+                  }
+                }
+              ]
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
     } finally {
-      // Reset loading state if still on this screen
       setIsSubmitting(false);
     }
   };
@@ -144,14 +186,6 @@ export function RegisterForm({ onSwitchToLogin }) {
           disabled={isProcessing}
         />
       </View>
-
-      {isProcessing && (
-        <View style={styles.processingOverlay}>
-          <Text style={styles.processingText}>
-            🔐 Generating encryption keys...
-          </Text>
-        </View>
-      )}
     </View>
   );
 }
@@ -199,19 +233,5 @@ const styles = StyleSheet.create({
   switchText: {
     fontSize: 16,
     color: UI_CONFIG.COLORS.TEXT_SECONDARY
-  },
-  processingOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: UI_CONFIG.COLORS.PRIMARY,
-    padding: UI_CONFIG.SPACING.MD,
-    alignItems: 'center'
-  },
-  processingText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500'
   }
 });

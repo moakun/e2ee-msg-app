@@ -13,7 +13,10 @@ class WebSocketServiceClass {
     this.isEnabled = false;
     this.authToken = null;
     this.processedMessages = new Set(); // Track processed message IDs
+    this.messageBuffer = []; // Buffer for batch processing
+    this.bufferTimer = null;
   }
+
 
   async connect(serverUrl, userId, username) {
     // Skip connection if no server URL or disabled
@@ -239,6 +242,7 @@ class WebSocketServiceClass {
     if (this.onMessageReceived) {
       this.onMessageReceived(data);
     }
+    
   }
 
   handleMessageDelivery(data) {

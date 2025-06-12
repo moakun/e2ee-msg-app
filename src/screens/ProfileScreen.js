@@ -1,3 +1,4 @@
+// src/screens/ProfileScreen.js - Complete with Biometric Debug
 import React, { useState } from 'react';
 import {
   View,
@@ -10,32 +11,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { Button } from '../components/ui/Button';
+import { BiometricSettings } from '../components/settings/BiometricSettings';
+import { BiometricDebug } from '../components/debug/BiometricDebug';
+import { StorageDebug } from '../components/debug/StorageDebug';
 import { useAuth } from '../context/AuthContext';
-import { SecurityService } from '../services/security/SecurityService';
+import { DatabaseService } from '../services/database/DatabaseService';
 import { Storage } from '../utils/storage';
 import { UI_CONFIG } from '../utils/constants';
-import { StorageDebug } from '../components/debug/StorageDebug';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-
-  const handleBiometricToggle = async (value) => {
-    if (value) {
-      const enabled = await SecurityService.enableBiometricAuth();
-      if (enabled) {
-        setBiometricEnabled(true);
-        Alert.alert('Success', 'Biometric authentication enabled');
-      } else {
-        Alert.alert('Error', 'Failed to enable biometric authentication');
-      }
-    } else {
-      await Storage.removeSecure('biometricEnabled');
-      setBiometricEnabled(false);
-    }
-  };
+  const [showDebugTools, setShowDebugTools] = useState(false);
+  const navigation = useNavigation();
 
   const handleNotificationsToggle = async (value) => {
     setNotificationsEnabled(value);
@@ -69,23 +59,23 @@ export default function ProfileScreen() {
   };
 
   const resetDatabase = async () => {
-  Alert.alert(
-    'Reset Database',
-    'This will delete all data. Are you sure?',
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Reset',
-        style: 'destructive',
-        onPress: async () => {
-          await DatabaseService.resetDatabase();
-          await DatabaseService.init();
-          Alert.alert('Success', 'Database reset. Please restart the app.');
+    Alert.alert(
+      'Reset Database',
+      'This will delete all data. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            await DatabaseService.resetDatabase();
+            await DatabaseService.init();
+            Alert.alert('Success', 'Database reset. Please restart the app.');
+          }
         }
-      }
-    ]
-  );
-};
+      ]
+    );
+  };
 
   const SettingItem = ({ title, subtitle, icon, onPress, rightComponent }) => (
     <TouchableOpacity style={styles.settingItem} onPress={onPress}>
@@ -120,18 +110,14 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security</Text>
           
+          {/* Biometric Authentication Settings */}
+          <BiometricSettings />
+          
           <SettingItem
-            title="Biometric Authentication"
-            subtitle="Use fingerprint or face recognition"
+            title="Register/Update Biometric"
+            subtitle="Set up or update biometric authentication"
             icon="finger-print"
-            rightComponent={
-              <Switch
-                value={biometricEnabled}
-                onValueChange={handleBiometricToggle}
-                trackColor={{ false: '#E0E0E0', true: UI_CONFIG.COLORS.PRIMARY }}
-                thumbColor={biometricEnabled ? '#FFFFFF' : '#F4F3F4'}
-              />
-            }
+            onPress={() => navigation.navigate('BiometricRegister')}
           />
           
           <SettingItem
@@ -207,6 +193,17 @@ export default function ProfileScreen() {
           />
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Developer Tools</Text>
+          
+          <SettingItem
+            title="Debug Tools"
+            subtitle={showDebugTools ? "Hide debug information" : "Show debug information"}
+            icon="bug"
+            onPress={() => setShowDebugTools(!showDebugTools)}
+          />
+        </View>
+
         <View style={styles.dangerSection}>
           <Button
             title="Sign Out"
@@ -224,9 +221,16 @@ export default function ProfileScreen() {
           <Button
             title="Reset Database"
             onPress={resetDatabase}
+            style={styles.resetButton}
           />
         </View>
-        <StorageDebug />
+        
+        {showDebugTools && (
+          <>
+            <BiometricDebug />
+            <StorageDebug />
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -327,6 +331,10 @@ const styles = StyleSheet.create({
     marginBottom: UI_CONFIG.SPACING.MD
   },
   deleteButton: {
-    backgroundColor: UI_CONFIG.COLORS.ERROR
+    backgroundColor: UI_CONFIG.COLORS.ERROR,
+    marginBottom: UI_CONFIG.SPACING.MD
+  },
+  resetButton: {
+    backgroundColor: UI_CONFIG.COLORS.WARNING
   }
 });

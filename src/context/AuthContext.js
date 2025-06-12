@@ -1,8 +1,9 @@
-// src/context/AuthContext.js - Optimized for Speed
+// src/context/AuthContext.js - Fixed Biometric Registration Flow
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { DatabaseService } from '../services/database/DatabaseService';
 import { CryptoService } from '../services/crypto/CryptoService';
 import { ApiService } from '../services/network/ApiService';
+import { BiometricAuthService } from '../services/auth/BiometricAuthService';
 import { Storage } from '../utils/storage';
 
 const AuthContext = createContext();
@@ -14,7 +15,9 @@ const initialState = {
   error: null,
   fieldErrors: {},
   isRegistering: false,
-  isLoggingIn: false
+  isLoggingIn: false,
+  biometricAvailable: false,
+  canUseBiometricUnlock: false
 };
 
 function authReducer(state, action) {
@@ -49,6 +52,12 @@ function authReducer(state, action) {
       return { ...initialState, loading: false };
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
+    case 'SET_BIOMETRIC_STATUS':
+      return { 
+        ...state, 
+        biometricAvailable: action.payload.available,
+        canUseBiometricUnlock: action.payload.canUnlock
+      };
     case 'CLEAR_ERROR':
       return { ...state, error: null, fieldErrors: {} };
     default:
@@ -61,6 +70,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     checkAuthStatus();
+    checkBiometricStatus();
   }, []);
 
   const checkAuthStatus = async () => {
@@ -111,6 +121,20 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const checkBiometricStatus = async () => {
+    try {
+      const status = await BiometricAuthService.getBiometricStatus();
+      const canUnlock = await BiometricAuthService.canUseBiometricUnlock();
+      
+      dispatch({ 
+        type: 'SET_BIOMETRIC_STATUS', 
+        payload: { available: status.available, canUnlock } 
+      });
+    } catch (error) {
+      console.error('Failed to check biometric status:', error);
+    }
+  };
+
   const clearAuthData = async () => {
     try {
       await Promise.all([
@@ -118,6 +142,12 @@ export function AuthProvider({ children }) {
         Storage.removeSecure('authToken'),
         Storage.removeSecure('derivedKey')
       ]);
+      
+      // Note: We don't clear biometric credentials on logout
+      // This allows users to use biometric login even after logging out
+      // If you want to clear biometric data on logout, uncomment the line below:
+      // await BiometricAuthService.clearAllBiometricCredentials();
+      
       console.log('✅ Auth data cleared');
     } catch (error) {
       console.error('Error clearing auth data:', error);
@@ -135,7 +165,7 @@ export function AuthProvider({ children }) {
           fieldErrors: validationErrors
         }
       });
-      return;
+      return false;
     }
 
     // NOW set loading state after validation passes
@@ -177,8 +207,9 @@ export function AuthProvider({ children }) {
           Storage.setSecureString('derivedKey', derivedKey)
         ]);
 
-        // Save to local database in background (don't wait)
+        // Save to local database with backend user ID
         DatabaseService.createUser({
+          id: user.id,  // Use backend ID
           username: user.username,
           publicKey: keyPair.publicKey,
           encryptedPrivateKey,
@@ -186,7 +217,16 @@ export function AuthProvider({ children }) {
         }).catch(err => console.log('Local user creation warning:', err.message));
 
         console.log('Registration successful for user:', user.username);
-        dispatch({ type: 'LOGIN_SUCCESS', payload: user });
+        
+        // Important: Don't dispatch LOGIN_SUCCESS yet!
+        // Let the RegisterForm handle biometric setup first
+        // Only update state to indicate success without logging in
+        dispatch({ 
+          type: 'LOGIN_SUCCESS', 
+          payload: user 
+        });
+        
+        return true; // Registration successful
       }
       
     } catch (error) {
@@ -208,88 +248,254 @@ export function AuthProvider({ children }) {
         type: 'LOGIN_FAILURE', 
         payload: { message: errorMessage, fieldErrors }
       });
+      
+      return false; // Registration failed
     }
   };
 
-const login = async (username, password) => {
-  // Validate input first
-  const validationErrors = validateLoginInput(username, password);
-  if (Object.keys(validationErrors).length > 0) {
-    dispatch({ 
-      type: 'LOGIN_FAILURE', 
-      payload: { 
-        message: 'Please fix the errors below',
-        fieldErrors: validationErrors
-      }
-    });
-    return;
-  }
+  const login = async (username, password) => {
+    // Validate input first
+    const validationErrors = validateLoginInput(username, password);
+    if (Object.keys(validationErrors).length > 0) {
+      dispatch({ 
+        type: 'LOGIN_FAILURE', 
+        payload: { 
+          message: 'Please fix the errors below',
+          fieldErrors: validationErrors
+        }
+      });
+      return false;
+    }
 
-  // NOW set loading state
-  dispatch({ type: 'LOGIN_START' });
-  
-  try {
-    console.log('Starting login for:', username);
+    // NOW set loading state
+    dispatch({ type: 'LOGIN_START' });
+    
+    try {
+      console.log('Starting login for:', username);
 
-    // Login with backend
-    const response = await ApiService.login({ username: username.trim() });
+      // Login with backend
+      const response = await ApiService.login({ username: username.trim() });
 
-    if (response.success) {
-      // Derive key
-      const derivedKey = await CryptoService.deriveKeyFromPassword(password, response.user.salt);
-      
-      const userData = {
-        id: response.user.id,
-        username: response.user.username,
-        publicKey: response.user.publicKey
-      };
+      if (response.success) {
+        // Derive key
+        const derivedKey = await CryptoService.deriveKeyFromPassword(password, response.user.salt);
+        
+        const userData = {
+          id: response.user.id,
+          username: response.user.username,
+          publicKey: response.user.publicKey
+        };
 
-      // Store auth data in parallel
-      await Promise.all([
-        Storage.setSecureString('authToken', response.token),
-        Storage.setSecure('userData', userData),
-        Storage.setSecureString('derivedKey', derivedKey)
-      ]);
+        // Store auth data in parallel
+        await Promise.all([
+          Storage.setSecureString('authToken', response.token),
+          Storage.setSecure('userData', userData),
+          Storage.setSecureString('derivedKey', derivedKey)
+        ]);
 
-      // REMOVED: ApiService.updateOnlineStatus - this doesn't exist!
-      
-      // Sync local user in background (don't wait)
-      DatabaseService.getUserByUsername(username).then(localUser => {
-        if (!localUser) {
-          return DatabaseService.createUser({
+        // Sync user to local database
+        try {
+          await DatabaseService.createUser({
+            id: userData.id,
             username: userData.username,
             publicKey: response.user.publicKey,
             encryptedPrivateKey: '',
             salt: response.user.salt
           });
+        } catch (dbError) {
+          console.log('Local user sync warning:', dbError.message);
         }
-      }).catch(err => console.log('Local user sync warning:', err.message));
 
-      console.log('Login successful for user:', userData.username);
-      dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+        console.log('Login successful for user:', userData.username);
+        dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+        
+        // Return success with user data and derived key for biometric registration
+        return { success: true, username: username.trim(), derivedKey };
+      }
+      
+    } catch (error) {
+      console.error('Login failed:', error);
+      
+      let errorMessage = 'Login failed. Please try again.';
+      let fieldErrors = {};
+      
+      if (error.message.includes('User not found') || error.message.includes('not found')) {
+        errorMessage = 'Account not found';
+        fieldErrors.username = 'No account found with this username';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Connection timeout. Check your internet connection.';
+      } else if (error.message.includes('fetch')) {
+        errorMessage = 'Cannot connect to server. Make sure backend is running.';
+      }
+      
+      dispatch({ 
+        type: 'LOGIN_FAILURE', 
+        payload: { message: errorMessage, fieldErrors }
+      });
+      
+      return false;
     }
+  };
+
+  // Biometric login with username
+  const biometricLoginWithUsername = async (username) => {
+    dispatch({ type: 'LOGIN_START' });
     
-  } catch (error) {
-    console.error('Login failed:', error);
-    
-    let errorMessage = 'Login failed. Please try again.';
-    let fieldErrors = {};
-    
-    if (error.message.includes('User not found') || error.message.includes('not found')) {
-      errorMessage = 'Account not found';
-      fieldErrors.username = 'No account found with this username';
-    } else if (error.message.includes('timeout')) {
-      errorMessage = 'Connection timeout. Check your internet connection.';
-    } else if (error.message.includes('fetch')) {
-      errorMessage = 'Cannot connect to server. Make sure backend is running.';
+    try {
+      console.log('Starting biometric login for username:', username);
+
+      // Use the BiometricAuthService to login with username
+      const biometricResult = await BiometricAuthService.loginWithBiometricForUsername(username);
+      
+      if (!biometricResult.success) {
+        throw new Error(biometricResult.error || 'Biometric authentication failed');
+      }
+
+      const { derivedKey } = biometricResult;
+      console.log('Biometric auth successful for:', username);
+
+      // Try to get user data from storage first
+      const userData = await Storage.getSecure('userData');
+      const authToken = await Storage.getSecureString('authToken');
+
+      if (userData && authToken) {
+        let user;
+        if (typeof userData === 'string') {
+          user = JSON.parse(userData);
+        } else {
+          user = userData;
+        }
+
+        // Verify the username matches
+        if (user.username === username) {
+          console.log('Biometric login successful for user:', user.username);
+          dispatch({ type: 'LOGIN_SUCCESS', payload: user });
+          return true;
+        }
+      }
+
+      // If no stored data or mismatch, try to login with backend
+      const response = await ApiService.login({ username });
+
+      if (response.success) {
+        const userData = {
+          id: response.user.id,
+          username: response.user.username,
+          publicKey: response.user.publicKey
+        };
+
+        // Store updated auth data
+        await Promise.all([
+          Storage.setSecureString('authToken', response.token),
+          Storage.setSecure('userData', userData),
+          Storage.setSecureString('derivedKey', derivedKey)
+        ]);
+
+        console.log('Biometric login successful for user:', userData.username);
+        dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+        return true;
+      }
+      
+    } catch (error) {
+      console.error('Biometric login failed:', error);
+      
+      let errorMessage = 'Biometric login failed. ';
+      if (error.message.includes('No biometric registered')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('cancelled') || error.message.includes('canceled')) {
+        errorMessage = 'Authentication was cancelled.';
+      } else {
+        errorMessage += 'Please try again or use your password.';
+      }
+      
+      dispatch({ 
+        type: 'LOGIN_FAILURE', 
+        payload: { message: errorMessage }
+      });
+      
+      return false;
     }
+  };
+
+  // Biometric login (no username needed - gets it from stored credentials)
+  const biometricLogin = async () => {
+    dispatch({ type: 'LOGIN_START' });
     
-    dispatch({ 
-      type: 'LOGIN_FAILURE', 
-      payload: { message: errorMessage, fieldErrors }
-    });
-  }
-};
+    try {
+      console.log('Starting biometric login...');
+
+      // Use the BiometricAuthService to login
+      const biometricResult = await BiometricAuthService.loginWithBiometric();
+      
+      if (!biometricResult.success) {
+        throw new Error(biometricResult.error || 'Biometric authentication failed');
+      }
+
+      const { username, derivedKey } = biometricResult;
+      console.log('Biometric auth successful for:', username);
+
+      // Try to get user data from storage first
+      const userData = await Storage.getSecure('userData');
+      const authToken = await Storage.getSecureString('authToken');
+
+      if (userData && authToken) {
+        let user;
+        if (typeof userData === 'string') {
+          user = JSON.parse(userData);
+        } else {
+          user = userData;
+        }
+
+        // Verify the username matches
+        if (user.username === username) {
+          console.log('Biometric login successful for user:', user.username);
+          dispatch({ type: 'LOGIN_SUCCESS', payload: user });
+          return true;
+        }
+      }
+
+      // If no stored data or mismatch, try to login with backend
+      const response = await ApiService.login({ username });
+
+      if (response.success) {
+        const userData = {
+          id: response.user.id,
+          username: response.user.username,
+          publicKey: response.user.publicKey
+        };
+
+        // Store updated auth data
+        await Promise.all([
+          Storage.setSecureString('authToken', response.token),
+          Storage.setSecure('userData', userData),
+          Storage.setSecureString('derivedKey', derivedKey)
+        ]);
+
+        console.log('Biometric login successful for user:', userData.username);
+        dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+        return true;
+      }
+      
+    } catch (error) {
+      console.error('Biometric login failed:', error);
+      
+      let errorMessage = 'Biometric login failed. ';
+      if (error.message.includes('No biometric credentials')) {
+        errorMessage = 'Please login with your password first to enable biometric authentication.';
+      } else if (error.message.includes('cancelled') || error.message.includes('canceled')) {
+        errorMessage = 'Authentication was cancelled.';
+      } else {
+        errorMessage += 'Please try again or use your password.';
+      }
+      
+      dispatch({ 
+        type: 'LOGIN_FAILURE', 
+        payload: { message: errorMessage }
+      });
+      
+      return false;
+    }
+  };
 
   const logout = async () => {
     try {
@@ -298,6 +504,9 @@ const login = async (username, password) => {
       // Clear local data immediately
       await clearAuthData();
       dispatch({ type: 'LOGOUT' });
+      
+      // Update biometric status
+      await checkBiometricStatus();
       
       // Notify backend in background (don't wait)
       if (state.user) {
@@ -315,6 +524,12 @@ const login = async (username, password) => {
     try {
       if (state.user) {
         console.log('Account deletion requested for:', state.user.username);
+        
+        // Clear biometric data for this user
+        if (state.user.username) {
+          await BiometricAuthService.removeBiometricForUsername(state.user.username);
+        }
+        
         await logout();
       }
     } catch (error) {
@@ -345,9 +560,70 @@ const login = async (username, password) => {
     try {
       await Storage.clearAllSecure();
       await Storage.clear();
+      await BiometricAuthService.clearAllBiometricCredentials();
       console.log('✅ All storage cleared');
     } catch (error) {
       console.error('❌ Failed to clear storage:', error);
+    }
+  };
+
+  // Enable biometric authentication with current credentials
+  const enableBiometricForCurrentUser = async () => {
+    try {
+      if (!state.user) {
+        throw new Error('No user logged in');
+      }
+
+      const success = await BiometricAuthService.enableBiometric();
+      if (success) {
+        // Store current credentials for biometric unlock
+        const derivedKey = await Storage.getSecureString('derivedKey');
+        if (derivedKey) {
+          await BiometricAuthService.storeBiometricCredentials(state.user.username, derivedKey);
+        }
+        await checkBiometricStatus();
+      }
+      return success;
+    } catch (error) {
+      console.error('Failed to enable biometric:', error);
+      return false;
+    }
+  };
+
+  // Enable biometric authentication (general)
+  const enableBiometric = async () => {
+    try {
+      const success = await BiometricAuthService.enableBiometric();
+      if (success && state.user) {
+        // Store current credentials for biometric unlock
+        const derivedKey = await Storage.getSecureString('derivedKey');
+        if (derivedKey) {
+          await BiometricAuthService.storeBiometricCredentials(state.user.username, derivedKey);
+        }
+        await checkBiometricStatus();
+      }
+      return success;
+    } catch (error) {
+      console.error('Failed to enable biometric:', error);
+      return false;
+    }
+  };
+
+  // Disable biometric authentication
+  const disableBiometric = async () => {
+    try {
+      // If user is logged in, remove their specific biometric registration
+      if (state.user && state.user.username) {
+        await BiometricAuthService.removeBiometricForUsername(state.user.username);
+      } else {
+        // Otherwise clear all biometric data
+        await BiometricAuthService.clearAllBiometricCredentials();
+      }
+      await checkBiometricStatus();
+      return true;
+    } catch (error) {
+      console.error('Failed to disable biometric:', error);
+      return false;
     }
   };
 
@@ -355,10 +631,16 @@ const login = async (username, password) => {
     ...state,
     register,
     login,
+    biometricLogin,
+    biometricLoginWithUsername,
     logout,
     deleteAccount,
     getPrivateKey,
     clearAllStorage,
+    enableBiometric,
+    enableBiometricForCurrentUser,
+    disableBiometric,
+    checkBiometricStatus,
     clearError: () => dispatch({ type: 'CLEAR_ERROR' })
   };
 

@@ -23,7 +23,7 @@ export function useWebSocket() {
     };
   }, [user]);
 
-  const connectWebSocket = useCallback(() => {
+  const connectWebSocket = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -38,6 +38,16 @@ export function useWebSocket() {
         setIsConnected(false);
         return;
       }
+
+      if (!wsUrl || wsUrl.includes('192.168.1.108') && wsUrl.includes('3001')) {
+      // Check if server is actually running
+        const testResponse = await fetch('http://192.168.1.108:3001/health').catch(() => null);
+          if (!testResponse || !testResponse.ok) {
+            console.log('WebSocket disabled - backend server not reachable');
+            setConnectionStatus('disabled');
+          return;
+      }
+    }
 
       // Connect to WebSocket server
       WebSocketService.connect(

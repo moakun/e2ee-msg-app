@@ -28,7 +28,7 @@ export default function ChatListScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateChat, setShowCreateChat] = useState(false);
   const [newChatName, setNewChatName] = useState('');
-  const { user, logout, deleteAccount } = useAuth();
+  const { user, logout, deleteAccount, pendingInvitations = [] } = useAuth();
   const { createChat } = useChat();
 
   useEffect(() => {
@@ -273,6 +273,16 @@ export default function ChatListScreen({ navigation }) {
             <Ionicons name="people" size={24} color={UI_CONFIG.COLORS.PRIMARY} />
           </TouchableOpacity>
           <TouchableOpacity 
+            onPress={() => navigation.navigate('Invitations')} 
+            style={styles.headerButton}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="mail" size={24} color={UI_CONFIG.COLORS.PRIMARY} />
+              {pendingInvitations.length > 0 && (
+            <View style={styles.notificationDot} />
+          )}  
+          </TouchableOpacity>
+          <TouchableOpacity 
             onPress={() => setShowCreateChat(true)} 
             style={styles.headerButton}
             activeOpacity={0.7}
@@ -336,39 +346,46 @@ export default function ChatListScreen({ navigation }) {
         presentationStyle="pageSheet"
         onRequestClose={() => setShowCreateChat(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowCreateChat(false)}>
-              <Text style={styles.cancelButton}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>New Group Chat</Text>
-            <TouchableOpacity 
-              onPress={handleCreateChat}
-              disabled={!newChatName.trim()}
-            >
-              <Text style={[
-                styles.createButton,
-                !newChatName.trim() && styles.createButtonDisabled
-              ]}>Create</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.modalContent}>
-            <Text style={styles.modalLabel}>Group Name</Text>
-            <TextInput
-              style={styles.chatNameInput}
-              placeholder="Enter group name"
-              value={newChatName}
-              onChangeText={setNewChatName}
-              autoFocus
-              maxLength={50}
-            />
-            <Text style={styles.modalHint}>
-              You can invite users to this group after creating it
-            </Text>
-          </View>
-        </SafeAreaView>
-      </Modal>
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={() => setShowCreateChat(false)}>
+            <Text style={styles.cancelButton}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>New Chat</Text>
+          <View style={{ width: 50 }} />
+        </View>
+    
+        <View style={styles.modalContent}>
+          <TouchableOpacity
+            style={styles.modalOption}
+            onPress={() => {
+              setShowCreateChat(false);
+              navigation.navigate('UserSearch');
+            }}
+          >
+        <Ionicons name="person-add" size={24} color={UI_CONFIG.COLORS.PRIMARY} />
+        <View style={styles.modalOptionText}>
+          <Text style={styles.modalOptionTitle}>New Direct Chat</Text>
+          <Text style={styles.modalOptionSubtitle}>Start a conversation with one person</Text>
+        </View>
+      </TouchableOpacity>
+      
+      <TouchableOpacity
+        style={styles.modalOption}
+        onPress={() => {
+          setShowCreateChat(false);
+          navigation.navigate('GroupChat');
+        }}
+      >
+        <Ionicons name="people" size={24} color={UI_CONFIG.COLORS.PRIMARY} />
+        <View style={styles.modalOptionText}>
+          <Text style={styles.modalOptionTitle}>Create Group</Text>
+          <Text style={styles.modalOptionSubtitle}>Start a group conversation</Text>
+        </View>
+      </TouchableOpacity>
+    </View>
+  </SafeAreaView>
+</Modal>
     </SafeAreaView>
   );
 }
@@ -552,5 +569,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: UI_CONFIG.COLORS.TEXT_SECONDARY,
     fontStyle: 'italic'
-  }
+  },
+  notificationDot: {
+  position: 'absolute',
+  top: 0,
+  right: 0,
+  width: 8,
+  height: 8,
+  borderRadius: 4,
+  backgroundColor: UI_CONFIG.COLORS.ERROR
+},
+modalOption: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  padding: UI_CONFIG.SPACING.MD,
+  borderBottomWidth: 1,
+  borderBottomColor: '#F0F0F0'
+},
+modalOptionText: {
+  marginLeft: UI_CONFIG.SPACING.MD,
+  flex: 1
+},
+modalOptionTitle: {
+  fontSize: 16,
+  fontWeight: '600',
+  color: UI_CONFIG.COLORS.TEXT,
+  marginBottom: 4
+},
+modalOptionSubtitle: {
+  fontSize: 14,
+  color: UI_CONFIG.COLORS.TEXT_SECONDARY
+}
 });

@@ -5,6 +5,26 @@ import { Storage } from '../../utils/storage';
 export class ApiService {
   static baseURL = API_CONFIG.BASE_URL;
   static timeout = API_CONFIG.TIMEOUT;
+  static requestCache = new Map();
+  static cacheExpiry = 5 * 60 * 1000; // 5 minutes
+
+  static async cachedRequest(endpoint, options = {}) {
+    const cacheKey = `${endpoint}_${JSON.stringify(options)}`;
+    const cached = this.requestCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
+      console.log('🚀 Using cached request');
+      return cached.data;
+    }
+    
+    const data = await this.request(endpoint, options);
+    this.requestCache.set(cacheKey, {
+      data,
+      timestamp: Date.now()
+    });
+    
+    return data;
+  }
 
   // Generic request method with auth token and better error handling
   static async request(endpoint, options = {}) {
@@ -197,7 +217,93 @@ export class ApiService {
     });
   }
 
-  // Test backend connection
+  // Invitation endpoints
+  static async sendInvitation(toUserId, message = '') {
+    return this.request('/invitations/send', {
+      method: 'POST',
+      body: JSON.stringify({ toUserId, message })
+    });
+  }
+
+  static async getPendingInvitations() {
+    try {
+      return await this.request('/invitations/pending');
+    } catch (error) {
+      console.log('Get pending invitations error:', error.message);
+      return { success: false, invitations: [], error: error.message };
+    }
+  }
+
+  static async getSentInvitations() {
+    try {
+      return await this.request('/invitations/sent');
+    } catch (error) {
+      console.log('Get sent invitations error:', error.message);
+      return { success: false, invitations: [], error: error.message };
+    }
+  }
+
+  static async acceptInvitation(invitationId) {
+    return this.request(`/invitations/${invitationId}/accept`, {
+      method: 'POST'
+    });
+  }
+
+  static async rejectInvitation(invitationId) {
+    return this.request(`/invitations/${invitationId}/reject`, {
+      method: 'POST'
+    });
+  }
+
+  static async cancelInvitation(invitationId) {
+    return this.request(`/invitations/${invitationId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  static async createGroup(groupData) {
+  return this.request('/groups/create', {
+    method: 'POST',
+    body: JSON.stringify(groupData)
+  });
+}
+
+static async getGroupDetails(groupId) {
+  return this.request(`/groups/${groupId}`);
+}
+
+static async addGroupMembers(groupId, memberIds) {
+  return this.request(`/groups/${groupId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ memberIds })
+  });
+}
+
+static async removeGroupMember(groupId, memberId) {
+  return this.request(`/groups/${groupId}/members/${memberId}`, {
+    method: 'DELETE'
+  });
+}
+
+static async leaveGroup(groupId) {
+  return this.request(`/groups/${groupId}/leave`, {
+    method: 'POST'
+  });
+}
+
+static async updateGroupInfo(groupId, updates) {
+  return this.request(`/groups/${groupId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates)
+  });
+}
+
+static async promoteToAdmin(groupId, memberId) {
+  return this.request(`/groups/${groupId}/promote/${memberId}`, {
+    method: 'POST'
+  });
+}
+
   static async testConnection() {
     try {
       console.log('Testing connection to:', this.baseURL);

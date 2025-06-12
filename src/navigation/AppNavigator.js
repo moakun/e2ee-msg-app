@@ -1,4 +1,4 @@
-// src/navigation/AppNavigator.js - Updated with UserSearch
+// src/navigation/AppNavigator.js - With Biometric Screens
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -6,12 +6,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { UI_CONFIG } from '../utils/constants';
 
-// Screens
+// Import screens
 import AuthScreen from '../screens/AuthScreen';
+import BiometricLoginScreen from '../screens/BiometricLoginScreen';
+import BiometricRegisterScreen from '../screens/BiometricRegisterScreen';
 import ChatListScreen from '../screens/ChatListScreen';
 import ChatScreen from '../screens/ChatScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import UserSearchScreen from '../screens/UserSearchScreen';
+import InvitationsScreen from '../screens/InvitationsScreen';
+import GroupChatScreen from '../screens/GroupChatScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -52,7 +56,23 @@ export default function AppNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {!isAuthenticated ? (
-        <Stack.Screen name="Auth" component={AuthScreen} />
+        <>
+          <Stack.Screen name="Auth" component={AuthScreen} />
+          <Stack.Screen 
+            name="BiometricLogin" 
+            component={BiometricLoginScreen}
+            options={{
+              presentation: 'modal'
+            }}
+          />
+          <Stack.Screen 
+            name="BiometricRegister" 
+            component={BiometricRegisterScreen}
+            options={{
+              presentation: 'modal'
+            }}
+          />
+        </>
       ) : (
         <>
           <Stack.Screen name="Main" component={ChatTabs} />
@@ -68,6 +88,27 @@ export default function AppNavigator() {
             component={UserSearchScreen}
             options={{
               headerShown: false
+            }}
+          />
+          <Stack.Screen 
+            name="Invitations" 
+            component={InvitationsScreen}
+            options={{
+              headerShown: false
+            }}  
+          />
+          <Stack.Screen 
+            name="GroupChat" 
+            component={GroupChatScreen}
+            options={{
+              headerShown: false
+            }}
+          />
+          <Stack.Screen 
+            name="BiometricRegister" 
+            component={BiometricRegisterScreen}
+            options={{
+              presentation: 'modal'
             }}
           />
         </>

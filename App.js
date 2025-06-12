@@ -1,8 +1,8 @@
-// App.js - With Timeout Protection
+// App.js - Fixed AppState Event Listener
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { LogBox, Alert, View, Text, StyleSheet } from 'react-native';
+import { LogBox, Alert, View, Text, StyleSheet, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
@@ -29,6 +29,28 @@ export default function App() {
 
   useEffect(() => {
     initializeApp();
+    
+    // Fixed AppState event listener for newer React Native versions
+    const handleAppStateChange = (nextAppState) => {
+      if (nextAppState === 'background') {
+        // Clear sensitive data when app goes to background
+        console.log('🔒 App moved to background - sensitive data would be cleared');
+        // Note: CryptoService.clearCache() would be called here if available
+      }
+    };
+
+    // Use the new event listener API
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    // Cleanup function
+    return () => {
+      if (subscription?.remove) {
+        subscription.remove();
+      } else {
+        // Fallback for older versions
+        AppState.removeEventListener?.('change', handleAppStateChange);
+      }
+    };
   }, []);
 
   const initializeApp = async () => {

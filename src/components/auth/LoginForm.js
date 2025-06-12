@@ -1,14 +1,18 @@
+// src/components/auth/LoginForm.js - With Login Options
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { useAuth } from '../../context/AuthContext';
+import { useNavigation } from '@react-navigation/native';
 import { UI_CONFIG } from '../../utils/constants';
 
 export function LoginForm({ onSwitchToRegister }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const { login, isLoggingIn, error, fieldErrors, clearError } = useAuth();
+  const navigation = useNavigation();
 
   // Clear errors when user starts typing
   useEffect(() => {
@@ -20,6 +24,14 @@ export function LoginForm({ onSwitchToRegister }) {
   const handleLogin = async () => {
     if (!username.trim() || !password) return;
     await login(username.trim(), password);
+  };
+
+  const handleBiometricLogin = () => {
+    navigation.navigate('BiometricLogin');
+  };
+
+  const handleRegisterBiometric = () => {
+    navigation.navigate('BiometricRegister');
   };
 
   return (
@@ -55,12 +67,27 @@ export function LoginForm({ onSwitchToRegister }) {
       />
 
       <Button
-        title="Sign In"
+        title="Sign In with Password"
         onPress={handleLogin}
         loading={isLoggingIn}
         disabled={isLoggingIn || !username.trim() || !password}
         style={styles.loginButton}
       />
+
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>or</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <TouchableOpacity
+        style={styles.biometricButton}
+        onPress={handleBiometricLogin}
+        disabled={isLoggingIn}
+      >
+        <Ionicons name="finger-print" size={24} color={UI_CONFIG.COLORS.PRIMARY} />
+        <Text style={styles.biometricButtonText}>Login with Biometric</Text>
+      </TouchableOpacity>
 
       <View style={styles.switchContainer}>
         <Text style={styles.switchText}>Don't have an account? </Text>
@@ -72,6 +99,15 @@ export function LoginForm({ onSwitchToRegister }) {
           disabled={isLoggingIn}
         />
       </View>
+
+      <TouchableOpacity
+        style={styles.registerBiometricLink}
+        onPress={handleRegisterBiometric}
+        disabled={isLoggingIn}
+      >
+        <Ionicons name="add-circle-outline" size={16} color={UI_CONFIG.COLORS.SECONDARY} />
+        <Text style={styles.registerBiometricText}>Register Biometric</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -110,6 +146,37 @@ const styles = StyleSheet.create({
   loginButton: {
     marginTop: UI_CONFIG.SPACING.LG
   },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: UI_CONFIG.SPACING.LG
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E0E0E0'
+  },
+  dividerText: {
+    fontSize: 14,
+    color: UI_CONFIG.COLORS.TEXT_SECONDARY,
+    marginHorizontal: UI_CONFIG.SPACING.MD
+  },
+  biometricButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: UI_CONFIG.SPACING.MD,
+    borderWidth: 1,
+    borderColor: UI_CONFIG.COLORS.PRIMARY,
+    borderRadius: 8,
+    backgroundColor: 'transparent'
+  },
+  biometricButtonText: {
+    fontSize: 16,
+    color: UI_CONFIG.COLORS.PRIMARY,
+    fontWeight: '600',
+    marginLeft: UI_CONFIG.SPACING.SM
+  },
   switchContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -119,5 +186,17 @@ const styles = StyleSheet.create({
   switchText: {
     fontSize: 16,
     color: UI_CONFIG.COLORS.TEXT_SECONDARY
+  },
+  registerBiometricLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: UI_CONFIG.SPACING.MD,
+    padding: UI_CONFIG.SPACING.SM
+  },
+  registerBiometricText: {
+    fontSize: 14,
+    color: UI_CONFIG.COLORS.SECONDARY,
+    marginLeft: UI_CONFIG.SPACING.XS
   }
 });

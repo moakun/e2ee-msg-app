@@ -8,6 +8,16 @@
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
+  "expo": {
+    "plugins": [
+      [
+        "expo-crypto",
+        {
+          "enableCrypto": true
+        }
+      ]
+    ]
+  },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.1.2",
     "@react-navigation/bottom-tabs": "^7.3.14",
@@ -18,6 +28,7 @@
     "expo": "~53.0.10",
     "expo-crypto": "^14.1.5",
     "expo-device": "^7.1.4",
+    "expo-local-authentication": "~16.0.4",
     "expo-notifications": "^0.31.3",
     "expo-secure-store": "^14.2.3",
     "expo-sqlite": "^15.2.12",
@@ -28,8 +39,7 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-vector-icons": "^10.2.0",
-    "socket.io-client": "^4.8.1",
-    "expo-local-authentication": "~16.0.4"
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.27.4"

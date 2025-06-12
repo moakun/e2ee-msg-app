@@ -21,7 +21,7 @@ import { WebSocketService } from '../services/network/WebSocketService';
 import { UI_CONFIG } from '../utils/constants';
 
 export default function ChatScreen({ route, navigation }) {
-  const { chatId, chatName, recipientPublicKey } = route.params;
+  const { chatId, chatName, recipientPublicKey, isGroup } = route.params;
   const { user, getPrivateKey } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -308,6 +308,9 @@ const sendMessage = async (messageText) => {
     // Prepare encrypted content
     let encryptedContent;
     
+    if (isGroup) {
+    encryptedContent = messageText.trim();
+  } else {
     try {
       const encryptedData = await CryptoService.encryptMessage(
         messageText.trim(), 
@@ -318,7 +321,7 @@ const sendMessage = async (messageText) => {
     } catch (encryptError) {
       console.warn('⚠️ Encryption failed, sending plain text:', encryptError);
       encryptedContent = messageText.trim();
-    }
+    }}
     
     // Save to local database FIRST
     const messageData = {

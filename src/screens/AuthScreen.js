@@ -1,3 +1,4 @@
+// src/screens/AuthScreen.js - Simplified
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -5,9 +6,8 @@ import {
   KeyboardAvoidingView, 
   Platform, 
   ScrollView,
-  Modal,
-  Text,
-  Animated
+  Animated,
+  Text
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LoginForm } from '../components/auth/LoginForm';
@@ -18,8 +18,8 @@ import { UI_CONFIG } from '../utils/constants';
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
-  const { loading, isLoggingIn, isRegistering } = useAuth();
   const [fadeAnim] = useState(new Animated.Value(0));
+  const { loading, isLoggingIn, isRegistering } = useAuth();
 
   useEffect(() => {
     if (isLoggingIn || isRegistering) {
@@ -32,6 +32,9 @@ export default function AuthScreen() {
       fadeAnim.setValue(0);
     }
   }, [isLoggingIn, isRegistering]);
+
+  const switchToLogin = () => setIsLogin(true);
+  const switchToRegister = () => setIsLogin(false);
 
   if (loading) {
     return (
@@ -50,16 +53,22 @@ export default function AuthScreen() {
         <ScrollView 
           contentContainerStyle={styles.scrollContainer}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
+          <View style={styles.header}>
+            <Text style={styles.appTitle}>SecureChat</Text>
+            <Text style={styles.appSubtitle}>End-to-end encrypted messaging</Text>
+          </View>
+
           {isLogin ? (
-            <LoginForm onSwitchToRegister={() => setIsLogin(false)} />
+            <LoginForm onSwitchToRegister={switchToRegister} />
           ) : (
-            <RegisterForm onSwitchToLogin={() => setIsLogin(true)} />
+            <RegisterForm onSwitchToLogin={switchToLogin} />
           )}
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Simple Loading Overlay */}
+      {/* Loading Overlay */}
       {(isLoggingIn || isRegistering) && (
         <Animated.View 
           style={[
@@ -71,7 +80,7 @@ export default function AuthScreen() {
           <View style={styles.loadingContent}>
             <LoadingSpinner size="large" color="#FFFFFF" />
             <Text style={styles.loadingText}>
-              {isLoggingIn ? 'Signing in...' : 'Creating account...'}
+              {isRegistering ? 'Creating account...' : 'Signing in...'}
             </Text>
           </View>
         </Animated.View>
@@ -97,6 +106,22 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     justifyContent: 'center'
+  },
+  header: {
+    alignItems: 'center',
+    paddingVertical: UI_CONFIG.SPACING.XL,
+    marginBottom: UI_CONFIG.SPACING.LG
+  },
+  appTitle: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: UI_CONFIG.COLORS.PRIMARY,
+    marginBottom: UI_CONFIG.SPACING.XS
+  },
+  appSubtitle: {
+    fontSize: 16,
+    color: UI_CONFIG.COLORS.TEXT_SECONDARY,
+    textAlign: 'center'
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

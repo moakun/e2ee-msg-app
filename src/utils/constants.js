@@ -1,7 +1,7 @@
 // src/utils/constants.js
 export const API_CONFIG = {
-  BASE_URL: 'http://192.168.1.103:3001/api', // Replace XXX with your actual IP
-  WS_URL: 'ws://192.168.1.103:3001',
+  BASE_URL: 'http://192.168.1.108:3001/api', // Replace XXX with your actual IP
+  WS_URL: 'ws://192.168.1.108:3001',
   TIMEOUT: 10000
 };
 
